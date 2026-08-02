@@ -5,18 +5,9 @@ Hermes CLI - Main entry point.
 Usage:
     hermes                     # Interactive chat (default)
     hermes chat                # Interactive chat
-    hermes gateway             # Run gateway in foreground
-    hermes gateway start       # Start gateway as service
-    hermes gateway stop        # Stop gateway service
-    hermes gateway status      # Show gateway status
-    hermes gateway install     # Install gateway service
-    hermes gateway uninstall   # Uninstall gateway service
     hermes setup               # Interactive setup wizard
     hermes logout              # Clear stored authentication
     hermes status              # Show status of all components
-    hermes cron                # Manage cron jobs
-    hermes cron list           # List cron jobs
-    hermes cron status         # Check if cron scheduler is running
     hermes doctor              # Check configuration and dependencies
     hermes honcho setup                    # Configure Honcho AI memory integration
     hermes honcho status                   # Show Honcho config and connection status
@@ -37,10 +28,7 @@ Usage:
     hermes version             Show version
     hermes update              Update to latest version
     hermes uninstall           Uninstall Hermes Agent
-    hermes acp                 Run as an ACP server for editor integration
     hermes sessions browse     Interactive session picker with search
-
-    hermes claw migrate --dry-run  # Preview migration without changes
 """
 
 # IMPORTANT: hermes_bootstrap must be the very first import — it sets up
@@ -438,9 +426,8 @@ import functools as _functools
 
 from hermes_cli.sessions_cmd import cmd_sessions  # noqa: F401
 from hermes_cli.subcommands._shared import add_accept_hooks_flag as _add_accept_hooks_flag
-from hermes_cli.subcommands.cron import build_cron_parser
 from hermes_cli.subcommands.sync import build_sync_parser
-from hermes_cli.subcommands.gateway import build_gateway_parser
+from hermes_cli.subcommands.proxy import build_proxy_parser
 from hermes_cli.subcommands.profile import build_profile_parser
 from hermes_cli.subcommands.model import build_model_parser
 from hermes_cli.subcommands.setup import build_setup_parser
@@ -472,7 +459,6 @@ from hermes_cli.subcommands.gui import build_gui_parser
 from hermes_cli.subcommands.logs import build_logs_parser
 from hermes_cli.subcommands.prompt_size import build_prompt_size_parser
 from hermes_cli.subcommands.memory import build_memory_parser
-from hermes_cli.subcommands.acp import build_acp_parser
 from hermes_cli.subcommands.tools import build_tools_parser
 from hermes_cli.subcommands.insights import build_insights_parser
 from hermes_cli.subcommands.monitoring import build_monitoring_parser
@@ -480,7 +466,6 @@ from hermes_cli.subcommands.skills import build_skills_parser
 from hermes_cli.subcommands.pairing import build_pairing_parser
 from hermes_cli.subcommands.plugins import build_plugins_parser
 from hermes_cli.subcommands.mcp import build_mcp_parser
-from hermes_cli.subcommands.claw import build_claw_parser
 
 
 def _require_tty(command_name: str) -> None:
@@ -791,7 +776,6 @@ from hermes_cli.model_setup_flows import (
     _model_flow_azure_foundry,
     _model_flow_named_custom,
     _model_flow_copilot,
-    _model_flow_copilot_acp,
     _model_flow_kimi,
     _model_flow_stepfun,
     _model_flow_bedrock_api_key,
@@ -2740,15 +2724,6 @@ def cmd_chat(args):
         sys.exit(1)
 
 
-def cmd_gateway(args):
-    """Gateway management commands."""
-    _sync_bundled_skills_quietly()
-
-    from hermes_cli.gateway import gateway_command
-
-    gateway_command(args)
-
-
 def cmd_proxy(args):
     """Local OpenAI-compatible proxy to OAuth providers."""
     # Lazy import — pulls in aiohttp, which is gated behind an extras install
@@ -3430,8 +3405,6 @@ def select_provider_and_model(args=None):
         _model_flow_qwen_oauth(config, current_model)
     elif selected_provider == "minimax-oauth":
         _model_flow_minimax_oauth(config, current_model, args=args)
-    elif selected_provider == "copilot-acp":
-        _model_flow_copilot_acp(config, current_model)
     elif selected_provider == "copilot":
         _model_flow_copilot(config, current_model)
     elif selected_provider == "custom":
@@ -4580,13 +4553,6 @@ def cmd_status(args):
     show_status(args)
 
 
-def cmd_cron(args):
-    """Cron job management."""
-    from hermes_cli.cron import cron_command
-
-    cron_command(args)
-
-
 def cmd_sync(args):
     """Skill Sync — personal sync across devices, plus sharing with your org."""
     import json as _json
@@ -5046,7 +5012,6 @@ from hermes_cli.update_cmd import (  # noqa: F401
     _detect_venv_python_processes,
     _discard_lockfile_churn,
     _discard_stashed_changes,
-    _ensure_acp_launcher,
     _ensure_fhs_path_guard,
     _ensure_uv_for_termux,
     _finish_dashboard_update_cleanup,
@@ -8010,7 +7975,7 @@ def _hermes_exe_shims(scripts_dir: Path) -> list[Path]:
     if not _is_windows():
         return []
 
-    names = set(_load_console_script_names()) or {"hermes", "hermes-agent", "hermes-acp"}
+    names = set(_load_console_script_names()) or {"hermes", "hermes-agent"}
     # The gateway shim is not a [project.scripts] entry point, but older
     # update/install paths still rewrite and quarantine it.
     names.add("hermes-gateway")
@@ -9182,16 +9147,13 @@ def _coalesce_session_name_args(argv: list) -> list:
         "desktop",
         "gui",
         "honcho",
-        "claw",
         "plugins",
         "security",
-        "acp",
-        "webhook",
-        "memory",
-        "dump",
-        "debug",
+        "approvals",
+        "auth",
         "backup",
-        "import",
+        "bundles",
+        "checkpoints",
         "completion",
         "logs",
     }
@@ -10495,13 +10457,6 @@ def cmd_dashboard_register(args):
     _impl(args)
 
 
-def cmd_gateway_enroll(args):
-    """Enroll a self-hosted gateway with a relay connector."""
-    from hermes_cli.gateway_enroll import cmd_gateway_enroll as _impl
-
-    _impl(args)
-
-
 def cmd_completion(args, parser=None):
     """Print shell completion script."""
     from hermes_cli.completion import generate_bash, generate_zsh, generate_fish
@@ -10558,7 +10513,7 @@ def _build_provider_choices() -> list[str]:
     except Exception:
         # Fallback: static list guarantees the CLI always works
         return [
-            "auto", "openrouter", "nous", "openai-codex", "xai-oauth", "copilot-acp", "copilot",
+            "auto", "openrouter", "nous", "openai-codex", "xai-oauth", "copilot",
             "anthropic", "gemini", "vertex", "xai", "bedrock", "azure-foundry",
             "ollama-cloud", "huggingface", "zai", "kimi-coding", "kimi-coding-cn",
             "stepfun", "minimax", "minimax-cn", "kilocode", "novita", "xiaomi", "arcee",
@@ -10577,13 +10532,13 @@ def _build_provider_choices() -> list[str]:
 # to parse.
 _BUILTIN_SUBCOMMANDS = frozenset(
     {
-        "acp", "approvals", "auth", "backup", "bundles", "checkpoints", "claw", "completion",
+        "approvals", "auth", "backup", "bundles", "checkpoints", "completion",
         "computer-use",
-        "config", "console", "cron", "curator", "dashboard", "serve", "debug", "doctor",
-        "dump", "egress", "fallback", "gateway", "hooks", "import", "import-agent", "insights",
+        "config", "console", "curator", "dashboard", "serve", "debug", "doctor",
+        "dump", "egress", "fallback", "hooks", "import", "import-agent", "insights",
         "gui", "desktop", "kanban", "login", "logout", "logs", "lsp", "mcp", "memory", "migrate", "moa",
         "journey", "memory-graph", "learning",
-        "model", "monitoring", "pairing", "pets", "plugins", "portal", "profile",
+        "model", "monitoring", "pairing", "plugins", "portal", "profile",
         "project", "proxy",
         "prompt-size",
         "send", "sessions", "setup",
@@ -10708,10 +10663,8 @@ def _resolve_deferred_platform_cli_command(command_name: str | None) -> None:
         )
 
 
-_AGENT_COMMANDS = {None, "chat", "acp", "rl"}
+_AGENT_COMMANDS = {None, "chat", "rl"}
 _AGENT_SUBCOMMANDS = {
-    "cron": ("cron_command", {"run", "tick"}),
-    "gateway": ("gateway_command", {"run"}),
     "mcp": ("mcp_action", {"serve"}),
 }
 
@@ -10721,12 +10674,6 @@ def _is_tui_chat_launch(args) -> bool:
 
 
 def _command_has_dedicated_mcp_startup(args) -> bool:
-    if args.command == "acp":
-        return True
-    if args.command == "gateway" and getattr(args, "gateway_command", None) == "run":
-        return True
-    if args.command == "cron" and getattr(args, "cron_command", None) in {"run", "tick"}:
-        return True
     return False
 
 
@@ -11011,29 +10958,6 @@ def cmd_memory(args):
         memory_command(args)
 
 
-def cmd_acp(args):
-    """Launch Hermes Agent as an ACP server."""
-    try:
-        from acp_adapter.entry import main as acp_main
-
-        acp_argv = []
-        if getattr(args, "acp_version", False):
-            acp_argv.append("--version")
-        if getattr(args, "check", False):
-            acp_argv.append("--check")
-        if getattr(args, "setup", False):
-            acp_argv.append("--setup")
-        if getattr(args, "setup_browser", False):
-            acp_argv.append("--setup-browser")
-        if getattr(args, "assume_yes", False):
-            acp_argv.append("--yes")
-        acp_main(acp_argv)
-    except ImportError:
-        print("ACP dependencies not installed.", file=sys.stderr)
-        print("Install them with:  pip install -e '.[acp]'", file=sys.stderr)
-        sys.exit(1)
-
-
 def cmd_tools(args):
     action = getattr(args, "tools_action", None)
     if action in {"list", "disable", "enable"}:
@@ -11139,12 +11063,6 @@ def cmd_mcp(args):
     from hermes_cli.mcp_config import mcp_command
 
     mcp_command(args)
-
-
-def cmd_claw(args):
-    from hermes_cli.claw import claw_command
-
-    claw_command(args)
 
 
 def main():
@@ -11373,11 +11291,9 @@ def main():
     migrate_parser.set_defaults(func=cmd_migrate)
 
     # =========================================================================
-    # gateway + proxy commands  (parsers built in hermes_cli/subcommands/gateway.py)
+    # proxy command  (parser built in hermes_cli/subcommands/proxy.py)
     # =========================================================================
-    build_gateway_parser(
-        subparsers, cmd_gateway=cmd_gateway, cmd_proxy=cmd_proxy, cmd_gateway_enroll=cmd_gateway_enroll
-    )
+    build_proxy_parser(subparsers, cmd_proxy=cmd_proxy)
 
     # =========================================================================
     # lsp command
@@ -11447,10 +11363,6 @@ def main():
     # =========================================================================
     build_status_parser(subparsers, cmd_status=cmd_status)
 
-    # =========================================================================
-    # cron command  (parser built in hermes_cli/subcommands/cron.py)
-    # =========================================================================
-    build_cron_parser(subparsers, cmd_cron=cmd_cron)
     build_sync_parser(subparsers, cmd_sync=cmd_sync)
 
     # =========================================================================
@@ -11663,26 +11575,6 @@ def main():
         _register_curator_cli(curator_parser)
     except Exception as _exc:
         logging.getLogger(__name__).debug("curator CLI wiring failed: %s", _exc)
-
-    # =========================================================================
-    # pets command — petdex animated mascots (CLI / TUI / desktop display)
-    # =========================================================================
-    pets_parser = subparsers.add_parser(
-        "pets",
-        help="Browse, install, and select petdex animated pets",
-        description=(
-            "Petdex (https://github.com/crafter-station/petdex) is a public "
-            "gallery of animated sprite pets for coding agents. Install one "
-            "and Hermes shows it reacting to agent activity across the CLI, "
-            "TUI, and desktop app."
-        ),
-    )
-    try:
-        from hermes_cli.pets import register_cli as _register_pets_cli
-
-        _register_pets_cli(pets_parser)
-    except Exception as _exc:
-        logging.getLogger(__name__).debug("pets CLI wiring failed: %s", _exc)
 
     # =========================================================================
     # journey command — learned skills + memories over time, in the terminal
@@ -12316,11 +12208,6 @@ def main():
     build_monitoring_parser(subparsers, cmd_monitoring=cmd_monitoring)
 
     # =========================================================================
-    # claw command  (parser built in hermes_cli/subcommands/claw.py)
-    # =========================================================================
-    build_claw_parser(subparsers, cmd_claw=cmd_claw)
-
-    # =========================================================================
     # version command  (parser built in hermes_cli/subcommands/version.py)
     # =========================================================================
     build_version_parser(subparsers, cmd_version=cmd_version)
@@ -12334,11 +12221,6 @@ def main():
     # uninstall command  (parser built in hermes_cli/subcommands/uninstall.py)
     # =========================================================================
     build_uninstall_parser(subparsers, cmd_uninstall=cmd_uninstall)
-
-    # =========================================================================
-    # acp command  (parser built in hermes_cli/subcommands/acp.py)
-    # =========================================================================
-    build_acp_parser(subparsers, cmd_acp=cmd_acp)
 
     # =========================================================================
     # profile command  (parser built in hermes_cli/subcommands/profile.py)

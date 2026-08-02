@@ -2717,7 +2717,14 @@ def run_conversation(
                                 "completed": False,
                                 "interrupted": True,
                             }
-                        time.sleep(0.2)
+                        # Wait up to 200ms, waking immediately if /stop
+                        # or redirect arrives so the user isn't stuck for the
+                        # full backoff interval.
+                        _event = getattr(agent, "_interrupt_event", None)
+                        if _event is not None:
+                            _event.wait(0.2)
+                        else:
+                            time.sleep(0.2)
                         # Touch activity every ~30s so the gateway's inactivity
                         # monitor knows we're alive during backoff waits.
                         _backoff_touch_counter += 1
@@ -5524,7 +5531,12 @@ def run_conversation(
                             "completed": False,
                             "interrupted": True,
                         }
-                    time.sleep(0.2)  # Check interrupt every 200ms
+                    # Wait up to 200ms, waking immediately on interrupt.
+                    _event = getattr(agent, "_interrupt_event", None)
+                    if _event is not None:
+                        _event.wait(0.2)
+                    else:
+                        time.sleep(0.2)  # fallback for test stubs
                     # Touch activity every ~30s so the gateway's inactivity
                     # monitor knows we're alive during backoff waits.
                     _backoff_touch_counter += 1

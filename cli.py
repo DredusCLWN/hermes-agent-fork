@@ -9998,11 +9998,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         elif canonical == "personality":
             # Use original case (handler lowercases the personality name itself)
             self._handle_personality_command(cmd_original)
-        elif canonical == "pet":
-            self._handle_pet_command(cmd_original)
-
-        elif canonical == "hatch":
-            self._handle_hatch_command(cmd_original)
         elif canonical == "retry":
             retry_msg = self.retry_last()
             if retry_msg and hasattr(self, '_pending_input'):
@@ -10038,8 +10033,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             self._handle_branch_command(cmd_original)
         elif canonical == "save":
             self.save_conversation()
-        elif canonical == "cron":
-            self._handle_cron_command(cmd_original)
         elif canonical == "suggestions":
             self._handle_suggestions_command(cmd_original)
         elif canonical == "blueprint":
@@ -10290,8 +10283,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             self._handle_subgoal_command(cmd_original)
         elif canonical == "skin":
             self._handle_skin_command(cmd_original)
-        elif canonical == "voice":
-            self._handle_voice_command(cmd_original)
         elif canonical == "wake":
             self._handle_wake_command(cmd_original)
         elif canonical == "busy":
@@ -14434,7 +14425,21 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         # Fallback: shell clear command (rarely needed — escapes work on every
         # VT-capable terminal, but this covers exotic stdout wrappers).
         try:
-            os.system("cls" if os.name == "nt" else "clear")
+            import subprocess
+
+            from hermes_cli._subprocess_compat import windows_hide_flags
+
+            if os.name == "nt":
+                # ``cls`` is a shell builtin on Windows. Invoke it through
+                # ``cmd /c`` as an argv list (avoids ``shell=True``) and hide the
+                # console to prevent a visible flash from a windowless parent.
+                subprocess.run(
+                    [os.environ.get("COMSPEC", "cmd"), "/c", "cls"],
+                    check=False,
+                    creationflags=windows_hide_flags(),
+                )
+            else:
+                subprocess.run(["clear"], check=False)
         except Exception:
             pass
 
@@ -14926,30 +14931,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                 )
         except Exception:
             pass
-        # First-time OpenClaw-residue banner — fires once if ~/.openclaw/ exists
-        # after an OpenClaw→Hermes migration (especially migrations done by
-        # OpenClaw's own tool, which doesn't archive the source directory).
-        try:
-            from agent.onboarding import (
-                OPENCLAW_RESIDUE_FLAG,
-                detect_openclaw_residue,
-                is_seen,
-                mark_seen,
-                openclaw_residue_hint_cli,
-            )
-            if not is_seen(self.config, OPENCLAW_RESIDUE_FLAG) and detect_openclaw_residue():
-                try:
-                    _resid_color = _welcome_skin.get_color("banner_dim", "#B8860B")
-                except Exception:
-                    _resid_color = "#B8860B"
-                self._console_print(f"[{_resid_color}]{openclaw_residue_hint_cli()}[/]")
-                try:
-                    from hermes_cli.config import get_config_path as _get_cfg_path_resid
-                    mark_seen(_get_cfg_path_resid(), OPENCLAW_RESIDUE_FLAG)
-                except Exception:
-                    pass  # best-effort — banner will fire again next session
-        except Exception:
-            pass  # banner is non-critical — never break startup
         # Show a random tip to help users discover features
         try:
             from hermes_cli.tips import get_random_tip

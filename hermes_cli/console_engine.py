@@ -566,32 +566,6 @@ class HermesConsoleEngine:
             mutating=True,
             confirmation="Update Hermes configuration?",
         )
-        self.register(("cron", "list"), "cron list [--all]", "List scheduled jobs.", _cron_list)
-        self.register(("cron", "status"), "cron status", "Show cron scheduler status.", _cron_status)
-        self.register(
-            ("cron", "pause"),
-            "cron pause <job>",
-            "Pause a scheduled job.",
-            _cron_pause,
-            mutating=True,
-            confirmation="Pause this cron job?",
-        )
-        self.register(
-            ("cron", "resume"),
-            "cron resume <job>",
-            "Resume a paused cron job.",
-            _cron_resume,
-            mutating=True,
-            confirmation="Resume this cron job?",
-        )
-        self.register(
-            ("cron", "run"),
-            "cron run <job>",
-            "Run a job on the next scheduler tick.",
-            _cron_run,
-            mutating=True,
-            confirmation="Trigger this cron job?",
-        )
         self._register_broad_cli_surface()
 
     def _register_broad_cli_surface(self) -> None:
@@ -830,13 +804,6 @@ class HermesConsoleEngine:
                     ("install",),
                     ("update",),
                 },
-            ),
-            "cron": (
-                "hermes_cli.subcommands.cron",
-                "build_cron_parser",
-                "cmd_cron",
-                [("create",), ("edit",), ("remove",), ("tick",)],
-                {("create",), ("edit",), ("remove",), ("tick",)},
             ),
         }
 
@@ -1080,13 +1047,6 @@ class HermesConsoleEngine:
                     ("rollback",),
                 },
             ),
-            "pets": (
-                "hermes_cli.pets",
-                "register_cli",
-                None,
-                [("list",), ("install",), ("select",), ("show",), ("off",), ("scale",), ("remove",), ("doctor",)],
-                {("install",), ("select",), ("off",), ("scale",), ("remove",)},
-            ),
         }
         for root, (module, register, handler_name, paths, mutating) in registered.items():
             summaries = _registered_summaries(root, module, register)
@@ -1166,21 +1126,17 @@ class HermesConsoleEngine:
         if first.startswith("-"):
             return f"{first} is not available in Hermes Console."
         blocked_top = {
-            "acp",
             "chat",
-            "claw",
             "completion",
             "dashboard",
             "desktop",
             "fallback",
-            "gateway",
             "gui",
             "login",
             "logout",
             "model",
             "moa",
             "oneshot",
-
             "proxy",
             "serve",
             "setup",
@@ -1347,7 +1303,7 @@ def _sessions_stats(_engine: HermesConsoleEngine, args: list[str]) -> str:
             f"Listable sessions: {listable}",
             f"Total messages: {messages}",
         ]
-        for source in ["cli", "tui", "telegram", "discord", "slack", "cron"]:
+        for source in ["cli", "tui", "telegram", "discord", "slack"]:
             count = db.session_count(source=source)
             if count:
                 lines.append(f"  {source}: {count}")
@@ -1518,64 +1474,6 @@ def _profile_status(_engine: HermesConsoleEngine, args: list[str]) -> str:
         builder_name="build_profile_parser",
         main_handler_name="cmd_profile",
     )
-
-
-def _cron_list(_engine: HermesConsoleEngine, args: list[str]) -> str:
-    parser = _ArgumentParser(prog="cron list", add_help=False)
-    parser.add_argument("--all", action="store_true")
-    ns = parser.parse_args(args)
-    from hermes_cli.cron import cron_list
-
-    return _capture_output(lambda: cron_list(show_all=ns.all))
-
-
-def _cron_status(_engine: HermesConsoleEngine, args: list[str]) -> str:
-    _expect_no_args(args, "cron status")
-    from hermes_cli.cron import cron_status
-
-    return _capture_output(cron_status)
-
-
-def _cron_pause(_engine: HermesConsoleEngine, args: list[str]) -> str:
-    if len(args) != 1:
-        raise ConsoleCommandError("Usage: cron pause <job>")
-    from cron.jobs import AmbiguousJobReference, pause_job
-
-    try:
-        job = pause_job(args[0], reason="paused from hermes console")
-    except AmbiguousJobReference as exc:
-        raise ConsoleCommandError(str(exc)) from exc
-    if not job:
-        raise ConsoleCommandError(f"Job not found: {args[0]}")
-    return _format_job(job, "Paused")
-
-
-def _cron_resume(_engine: HermesConsoleEngine, args: list[str]) -> str:
-    if len(args) != 1:
-        raise ConsoleCommandError("Usage: cron resume <job>")
-    from cron.jobs import AmbiguousJobReference, resume_job
-
-    try:
-        job = resume_job(args[0])
-    except AmbiguousJobReference as exc:
-        raise ConsoleCommandError(str(exc)) from exc
-    if not job:
-        raise ConsoleCommandError(f"Job not found: {args[0]}")
-    return _format_job(job, "Resumed")
-
-
-def _cron_run(_engine: HermesConsoleEngine, args: list[str]) -> str:
-    if len(args) != 1:
-        raise ConsoleCommandError("Usage: cron run <job>")
-    from cron.jobs import AmbiguousJobReference, trigger_job
-
-    try:
-        job = trigger_job(args[0])
-    except AmbiguousJobReference as exc:
-        raise ConsoleCommandError(str(exc)) from exc
-    if not job:
-        raise ConsoleCommandError(f"Job not found: {args[0]}")
-    return _format_job(job, "Triggered")
 
 
 def run_console_repl(

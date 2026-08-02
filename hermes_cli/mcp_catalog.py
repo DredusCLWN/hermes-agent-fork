@@ -30,6 +30,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -381,7 +382,14 @@ def _run_bootstrap(cwd: Path, commands: List[str]) -> None:
     """
     for cmd in commands:
         print(color(f"  $ {cmd}", Colors.DIM))
-        proc = subprocess.run(cmd, cwd=str(cwd), shell=True)
+        run_kwargs: Dict[str, Any] = dict(cwd=str(cwd), shell=True)
+        if sys.platform == "win32":
+            # Bootstrap (npm/pip/uvx) can flash a visible console when invoked
+            # from a windowless parent; hide it while keeping output inherited.
+            from hermes_cli._subprocess_compat import windows_hide_flags
+
+            run_kwargs["creationflags"] = windows_hide_flags()
+        proc = subprocess.run(cmd, **run_kwargs)
         if proc.returncode != 0:
             raise CatalogError(
                 f"bootstrap step failed (exit {proc.returncode}): {cmd}"

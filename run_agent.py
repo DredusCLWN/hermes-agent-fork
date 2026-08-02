@@ -3013,6 +3013,13 @@ class AIAgent:
             self._interrupt_message = message
             self._pending_redirect = None
 
+        # Wake any thread blocked on the per-agent interrupt event (e.g.
+        # backoff polling in the conversation loop) immediately instead of
+        # waiting for the next sleep tick.
+        _interrupt_event = getattr(self, "_interrupt_event", None)
+        if _interrupt_event is not None:
+            _interrupt_event.set()
+
         # Codex app-server owns its model/tool loop and watches a private
         # interrupt event rather than Hermes' per-thread flag.
         if getattr(self, "api_mode", None) == "codex_app_server":
@@ -3102,6 +3109,11 @@ class AIAgent:
             self._interrupt_message = None
             if not preserve_redirect:
                 self._pending_redirect = None
+        # Clear the per-agent event so a new turn starts fresh and any stale
+        # wake is not observed.
+        _interrupt_event = getattr(self, "_interrupt_event", None)
+        if _interrupt_event is not None:
+            _interrupt_event.clear()
         self._interrupt_thread_signal_pending = False
         if self._execution_thread_id is not None:
             _set_interrupt(False, self._execution_thread_id)

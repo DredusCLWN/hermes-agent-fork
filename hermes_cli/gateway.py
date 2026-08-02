@@ -285,22 +285,11 @@ def _graceful_restart_via_sigusr1(pid: int, drain_timeout: float) -> bool:
     except (PermissionError, OSError):
         return False
 
-    import time as _time
+    # Wait without busy-polling. _wait_for_pid_exit uses psutil when
+    # available and falls back to the same _pid_exists polling otherwise.
+    from gateway.status import _wait_for_pid_exit
 
-    deadline = _time.monotonic() + max(drain_timeout, 1.0)
-    # IMPORTANT Windows note: ``os.kill(pid, 0)`` is NOT a no-op on
-    # Windows — Python's implementation calls ``TerminateProcess(handle, 0)``
-    # for sig=0, hard-killing the target. Use the cross-platform
-    # ``_pid_exists`` helper in gateway.status which does OpenProcess +
-    # WaitForSingleObject on Windows.
-    from gateway.status import _pid_exists
-
-    while _time.monotonic() < deadline:
-        if not _pid_exists(pid):
-            return True
-        _time.sleep(0.5)
-    # Drain didn't finish in time.
-    return False
+    return _wait_for_pid_exit(pid, timeout=max(drain_timeout, 1.0))
 
 
 def _get_ancestor_pids() -> set[int]:
@@ -812,14 +801,12 @@ def _spawn_gateway_restart_watcher(old_pid: int, run_argv: list[str]) -> bool:
         cmd = sys.argv[2:]
         _respawn_cwd = {respawn_cwd_literal}
         _respawn_env_overlay = {respawn_env_literal}
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            # ``os.kill(pid, 0)`` is not a no-op on Windows — use the
-            # cross-platform existence check.
-            from gateway.status import _pid_exists
-            if not _pid_exists(pid):
-                break
-            time.sleep(0.2)
+        from gateway.status import _wait_for_pid_exit
+
+        # Wait up to 120s for the old gateway to exit before respawning.
+        # psutil (hard dependency) wakes this immediately when the process
+        # dies instead of polling every 200ms.
+        _wait_for_pid_exit(pid, timeout=120)
 
         # Platform-appropriate detach for the respawned gateway.  On POSIX
         # start_new_session=True maps to os.setsid; on Windows we need
@@ -1557,10 +1544,10 @@ def _reap_unsupervised_gateway_orphans() -> bool:
     # any survivor so the replacement can bind the port cleanly.
     deadline = time.monotonic() + 5.0
     survivors = list(orphans)
+    from gateway.status import _wait_for_pids_exit
+
     while survivors and time.monotonic() < deadline:
-        survivors = [p for p in survivors if _pid_exists(p)]
-        if survivors:
-            time.sleep(0.2)
+        survivors = _wait_for_pids_exit(survivors, timeout=0.2)
     for pid in survivors:
         try:
             os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
@@ -1610,13 +1597,7 @@ def stop_profile_gateway() -> bool:
 
     # Wait briefly for it to exit. On Windows, os.kill(pid, 0) is NOT
     # a no-op — route through the cross-platform existence check.
-    import time as _time
-    from gateway.status import _pid_exists
-
-    for _ in range(20):
-        if not _pid_exists(pid):
-            break
-        _time.sleep(0.5)
+    _wait_for_pid_exit(pid, timeout=10.0)
 
     if get_running_pid() is None:
         remove_pid_file()

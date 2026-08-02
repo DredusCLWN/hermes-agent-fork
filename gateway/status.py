@@ -853,6 +853,74 @@ def _pid_exists(pid: int) -> bool:
             return False
 
 
+def _wait_for_pid_exit(pid: int, timeout: Optional[float] = None) -> bool:
+    """Block until *pid* exits or *timeout* elapses.
+
+    Returns True if the process disappeared during the wait, False if *timeout*
+    expired first. Uses psutil's process wait when available (no busy-polling),
+    falling back to a short poll loop through _pid_exists for stripped installs.
+    """
+    if timeout is not None and timeout <= 0:
+        return not _pid_exists(pid)
+
+    try:
+        import psutil  # type: ignore
+
+        proc = psutil.Process(int(pid))
+        try:
+            proc.wait(timeout=timeout)
+            return True
+        except psutil.TimeoutExpired:  # type: ignore[attr-defined]
+            return False
+        except psutil.NoSuchProcess:  # type: ignore[attr-defined]
+            return True
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # Fallback: short-poll using _pid_exists.
+    deadline = time.monotonic() + (timeout if timeout is not None else float("inf"))
+    while timeout is None or time.monotonic() < deadline:
+        if not _pid_exists(pid):
+            return True
+        remaining = deadline - time.monotonic() if timeout is not None else 0.5
+        time.sleep(min(0.5, max(0.05, remaining)))
+    return False
+
+
+def _wait_for_pids_exit(pids: list[int], timeout: float) -> list[int]:
+    """Wait up to *timeout* seconds for any of *pids* to exit.
+
+    Returns the subset of *pids* that are still alive at the end of the wait.
+    Uses psutil.wait_procs when available so one exiting process wakes the call
+    early, falling back to polling if psutil is unavailable.
+    """
+    if not pids:
+        return []
+
+    try:
+        import psutil  # type: ignore
+
+        procs = []
+        for p in pids:
+            try:
+                procs.append(psutil.Process(int(p)))
+            except psutil.NoSuchProcess:  # type: ignore[attr-defined]
+                pass
+        if not procs:
+            return []
+        gone, alive = psutil.wait_procs(procs, timeout=timeout)
+        return [p.pid for p in alive]
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+    # Fallback: poll once.
+    _wait_for_pid_exit(pids[0], timeout=timeout)
+    return [p for p in pids if _pid_exists(p)]
+
 
 def _release_file_lock(handle) -> None:
     try:

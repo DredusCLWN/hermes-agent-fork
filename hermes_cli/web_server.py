@@ -5231,8 +5231,7 @@ def _run_setup_command(
     shell: bool = False,
     timeout: int = 180,
 ) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        command,
+    run_kwargs: Dict[str, Any] = dict(
         shell=shell,
         executable="/bin/bash" if shell else None,
         env=_memory_provider_setup_env(),
@@ -5245,6 +5244,13 @@ def _run_setup_command(
         timeout=timeout,
         check=False,
     )
+    if sys.platform == "win32":
+        # Avoid visible console flash when setup commands run from a
+        # windowless parent (desktop app, service, pythonw).
+        from hermes_cli._subprocess_compat import windows_hide_flags
+
+        run_kwargs["creationflags"] = windows_hide_flags()
+    return subprocess.run(command, **run_kwargs)
 
 
 def _memory_provider_dependencies_installed(setup: Dict[str, Any]) -> bool:
