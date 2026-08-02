@@ -295,17 +295,11 @@ def _read_gateway_snapshot(config: Dict[str, Any]):
     )
 
 
-def _read_cron_snapshot():
-    from agent.monitoring.cron_health import build_cron_health_snapshot
-
-    return build_cron_health_snapshot()
-
-
 def _read_background_work_count() -> int:
     """Count live background/subagent work that ``active_agents`` does NOT include.
 
-    ``hermes.gateway.active_agents`` counts foreground turns + in-flight cron
-    jobs + API runs, but deliberately excludes backgrounded ``delegate_task``
+    ``hermes.gateway.active_agents`` counts foreground turns + API runs,
+    but deliberately excludes backgrounded ``delegate_task``
     subagents, ``terminal(background=true)`` processes, kanban workers, and the
     runner's own background tasks (they are tracked only for the scale-to-zero
     suspend guard, ``_scale_to_zero_has_live_background_work``). Without this
@@ -384,20 +378,6 @@ def _read_runtime_snapshot(config: Dict[str, Any]):
             type(exc).__name__,
         )
         logger.debug("background-work snapshot traceback", exc_info=True)
-    try:
-        cron_snapshot = _read_cron_snapshot()
-    except Exception as exc:
-        # Content-free visibility: cron telemetry silently dropping out is a
-        # release-relevant regression, so surface it at WARNING with only the
-        # exception *type* name (never the message, which could carry paths or
-        # other environment detail). exc_info stays on the DEBUG record.
-        logger.warning(
-            "cron health snapshot unavailable; cron telemetry not exported (error_type=%s)",
-            type(exc).__name__,
-        )
-        logger.debug("cron health snapshot traceback", exc_info=True)
-        return gateway_snapshot
-    gateway_snapshot.metrics.extend(cron_snapshot.metrics)
     return gateway_snapshot
 
 
@@ -445,12 +425,6 @@ def _start_metric_provider(config: Dict[str, Any], sdk: Dict[str, Any]) -> Any:
         "hermes.gateway.background_delegations",
         "hermes.platform.up",
         "hermes.platform.degraded",
-        "hermes.cron.scheduler.heartbeat_age_seconds",
-        "hermes.cron.scheduler.last_success_age_seconds",
-        "hermes.cron.scheduler.catch_up_occurrences",
-        "hermes.cron.jobs.enabled",
-        "hermes.cron.jobs.running",
-        "hermes.cron.jobs.overdue",
     ]
 
     def callback(name: str):

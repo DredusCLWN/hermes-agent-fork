@@ -945,12 +945,6 @@ def _sync_process_session_id(session_id: str) -> None:
 
     set_current_session_id(session_id)
 
-# Cron job system for scheduled tasks (execution is handled by the gateway)
-def get_job(*args, **kwargs):
-    from cron import get_job as _get_job
-
-    return _get_job(*args, **kwargs)
-
 # Resource cleanup imports for safe shutdown (terminal VMs, browser sessions)
 from hermes_cli.callbacks import prompt_for_secret
 
@@ -10033,10 +10027,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             self._handle_branch_command(cmd_original)
         elif canonical == "save":
             self.save_conversation()
-        elif canonical == "suggestions":
-            self._handle_suggestions_command(cmd_original)
-        elif canonical == "blueprint":
-            self._handle_blueprint_command(cmd_original)
         elif canonical == "curator":
             self._handle_curator_command(cmd_original)
         elif canonical == "kanban":

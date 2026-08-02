@@ -11572,24 +11572,6 @@ async def _run_cron_dashboard_io(func, *args, **kwargs):
     return result
 
 
-from hermes_cli.web_routers import cron as _cron_routes  # noqa: E402
-
-app.include_router(_cron_routes.router)
-from hermes_cli.web_routers.cron import (  # noqa: E402,F401 — legacy re-exports; tests call these via web_server.<name>
-    list_cron_jobs,
-    get_cron_job,
-    list_cron_job_runs,
-    create_cron_job,
-    get_cron_delivery_targets,
-    update_cron_job,
-    pause_cron_job,
-    resume_cron_job,
-    trigger_cron_job,
-    delete_cron_job,
-    cron_fire_webhook,
-    list_cron_blueprints,
-    instantiate_blueprint,
-)
 
 
 def _get_cron_job_sync(job_id: str, profile: Optional[str] = None):
