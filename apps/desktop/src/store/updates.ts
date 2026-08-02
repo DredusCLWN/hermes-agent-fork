@@ -200,40 +200,9 @@ export function reportInstallMethodWarning(message: string | undefined): void {
  * on every new commit. The snooze is persisted, so it survives relaunches too.
  */
 export function maybeNotifyUpdateAvailable(status: DesktopUpdateStatus | null) {
-  if (!status || status.supported === false || status.error || !status.targetSha) {
-    return
-  }
-
-  if ((status.behind ?? 0) <= 0) {
-    return
-  }
-
-  if (isUpdateToastSnoozed()) {
-    return
-  }
-
-  if ($updateApply.get().applying) {
-    return
-  }
-
-  const behind = status.behind ?? 0
-
-  notify({
-    action: {
-      label: translateNow('notifications.seeWhatsNew'),
-      onClick: () => {
-        snoozeUpdateToast()
-        openUpdatesWindow()
-      }
-    },
-    durationMs: 0,
-    icon: 'gift',
-    id: UPDATE_TOAST_ID,
-    kind: 'info',
-    message: translateNow('notifications.updateReadyMessage', behind),
-    onDismiss: () => snoozeUpdateToast(),
-    title: translateNow('notifications.updateReadyTitle')
-  })
+  // Auto-update toasts are disabled for this source/dev build; the user
+  // explicitly does not want to be prompted to update.
+  return
 }
 
 export function openUpdatesWindow(): void {
@@ -667,45 +636,18 @@ let lastConnectionMode: string | undefined
 
 /** Wire up background polling + progress streaming. Idempotent. */
 export function startUpdatePoller(): void {
+  // Auto-update polling is disabled for this source/dev build.
   if (pollerStarted || typeof window === 'undefined') {
     return
   }
 
   const bridge = window.hermesDesktop?.updates
 
-  if (!bridge) {
-    return
-  }
-
   pollerStarted = true
-  void checkUpdates()
-  void checkBackendUpdates()
-  void refreshDesktopVersion()
-  bridge.onProgress(ingestProgress)
 
-  // The poller starts at mount, before the gateway connects — so the first
-  // backend check above sees mode≠remote and no-ops. Re-check once the
-  // connection resolves to remote.
-  connectionUnsub = $connection.subscribe(conn => {
-    if (conn?.mode === lastConnectionMode) {
-      return
-    }
-
-    lastConnectionMode = conn?.mode
-
-    if (conn?.mode === 'remote') {
-      void checkBackendUpdates()
-    }
-  })
-
-  window.addEventListener('focus', onFocus)
-  backgroundTimer = setInterval(
-    () => {
-      void checkUpdates()
-      void checkBackendUpdates()
-    },
-    30 * 60 * 1000
-  )
+  // Keep the apply-progress listener wired so a manually-triggered update
+  // can still stream progress, but do not start background checks/timers.
+  bridge?.onProgress(ingestProgress)
 }
 
 export function stopUpdatePoller(): void {
