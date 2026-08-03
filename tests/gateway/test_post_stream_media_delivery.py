@@ -51,7 +51,6 @@ def _adapter():
         extract_media=BasePlatformAdapter.extract_media,
         extract_images=BasePlatformAdapter.extract_images,
         extract_local_files=BasePlatformAdapter.extract_local_files,
-        send_voice=AsyncMock(return_value=SendResult(success=True, message_id="voice")),
         send_document=AsyncMock(return_value=SendResult(success=True, message_id="doc")),
         send_image_file=AsyncMock(return_value=SendResult(success=True, message_id="image")),
         send_video=AsyncMock(return_value=SendResult(success=True, message_id="video")),
@@ -89,7 +88,6 @@ async def test_bare_local_path_in_streamed_reply_is_not_uploaded(tmp_path, monke
     adapter.send_image_file.assert_not_awaited()
     adapter.send_document.assert_not_awaited()
     adapter.send_video.assert_not_awaited()
-    adapter.send_voice.assert_not_awaited()
 
 
 @pytest.mark.asyncio

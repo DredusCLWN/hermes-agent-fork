@@ -1262,7 +1262,7 @@ class TeamsAdapter(BasePlatformAdapter):
         Remote ``http(s)://`` URLs are attached by reference; local paths
         (with optional ``file://`` prefix) are base64-encoded into a data
         URI. MIME type is guessed from the path/extension, falling back to
-        ``default_mime``. Shared by send_image / send_video / send_voice /
+        ``default_mime``. Shared by send_image / send_video /
         send_document so every media kind uses the same Attachment path.
         """
         if not self._app:

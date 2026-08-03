@@ -705,7 +705,7 @@ class TestTeamsStandaloneSend:
 
 
 class TestTeamsMediaAttachments:
-    """send_video / send_voice / send_document route through the same
+    """send_video / send_document route through the same
     Attachment mechanism as send_image so the gateway's media dispatch
     (run.py) delivers native attachments instead of the base-class text
     fallback (file path sent as plain text)."""
@@ -719,15 +719,6 @@ class TestTeamsMediaAttachments:
         adapter._app.send = AsyncMock(return_value=MagicMock(id="msg-001"))
         return adapter
 
-
-    @pytest.mark.asyncio
-    async def test_send_voice_local_file_base64(self, tmp_path):
-        adapter = self._make_adapter()
-        audio = tmp_path / "reply.mp3"
-        audio.write_bytes(b"ID3fakeaudio")
-        result = await adapter.send_voice("19:abc@thread.v2", str(audio), caption="here you go")
-        assert result.success
-        adapter._app.send.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_send_document_local_file_base64(self, tmp_path):

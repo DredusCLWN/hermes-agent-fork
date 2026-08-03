@@ -1901,8 +1901,8 @@ class WeixinAdapter(BasePlatformAdapter):
 
         async def _deliver_media(path: str, is_voice: bool = False) -> None:
             ext = Path(path).suffix.lower()
-            if is_voice or ext in _AUDIO_EXTS:
-                await self.send_voice(chat_id=chat_id, audio_path=path, metadata=metadata)
+            if ext in _AUDIO_EXTS:
+                await self.send_document(chat_id=chat_id, file_path=path, metadata=metadata)
             elif ext in _VIDEO_EXTS:
                 await self.send_video(chat_id=chat_id, video_path=path, metadata=metadata)
             elif ext in _IMAGE_EXTS:

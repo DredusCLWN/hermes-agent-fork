@@ -389,7 +389,6 @@ class TestSendTelegramMediaDelivery:
         bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=1))
         bot.send_photo = AsyncMock(return_value=SimpleNamespace(message_id=2))
         bot.send_video = AsyncMock()
-        bot.send_voice = AsyncMock()
         bot.send_audio = AsyncMock()
         bot.send_document = AsyncMock()
         _install_telegram_mock(monkeypatch, bot)
@@ -410,39 +409,11 @@ class TestSendTelegramMediaDelivery:
         bot.send_photo.assert_awaited_once()
         assert bot.send_photo.await_args.kwargs.get("caption") == "Hello there"
 
-    def test_sends_voice_for_ogg_with_voice_directive(self, tmp_path, monkeypatch):
-        voice_path = tmp_path / "voice.ogg"
-        voice_path.write_bytes(b"OggS" + b"\x00" * 32)
-
-        bot = MagicMock()
-        bot.send_message = AsyncMock()
-        bot.send_photo = AsyncMock()
-        bot.send_video = AsyncMock()
-        bot.send_voice = AsyncMock(return_value=SimpleNamespace(message_id=7))
-        bot.send_audio = AsyncMock()
-        bot.send_document = AsyncMock()
-        _install_telegram_mock(monkeypatch, bot)
-
-        result = asyncio.run(
-            _send_telegram(
-                "token",
-                "12345",
-                "",
-                media_files=[(str(voice_path), True)],
-            )
-        )
-
-        assert result["success"] is True
-        bot.send_voice.assert_awaited_once()
-        bot.send_audio.assert_not_awaited()
-        bot.send_message.assert_not_awaited()
-
     def test_missing_media_returns_error_without_leaking_raw_tag(self, monkeypatch):
         bot = MagicMock()
         bot.send_message = AsyncMock()
         bot.send_photo = AsyncMock()
         bot.send_video = AsyncMock()
-        bot.send_voice = AsyncMock()
         bot.send_audio = AsyncMock()
         bot.send_document = AsyncMock()
         _install_telegram_mock(monkeypatch, bot)
@@ -529,7 +500,6 @@ class TestSendToPlatformChunking:
         bot.send_message = AsyncMock(side_effect=fake_send_message)
         bot.send_photo = AsyncMock()
         bot.send_video = AsyncMock()
-        bot.send_voice = AsyncMock()
         bot.send_audio = AsyncMock()
         bot.send_document = AsyncMock()
         _install_telegram_mock(monkeypatch, bot)
@@ -720,7 +690,6 @@ class TestSendTelegramHtmlDetection:
         bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=1))
         bot.send_photo = AsyncMock()
         bot.send_video = AsyncMock()
-        bot.send_voice = AsyncMock()
         bot.send_audio = AsyncMock()
         bot.send_document = AsyncMock()
         return bot

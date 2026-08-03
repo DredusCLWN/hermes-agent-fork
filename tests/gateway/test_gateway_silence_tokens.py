@@ -48,7 +48,6 @@ def _runner(monkeypatch, tmp_path):
     runner._is_session_run_current = lambda _key, _gen: True
     runner._reply_anchor_for_event = lambda _event: None
     runner._get_guild_id = lambda _event: None
-    runner._should_send_voice_reply = lambda *_a, **_kw: False
     runner.hooks = MagicMock()
     runner.hooks.emit = AsyncMock()
 

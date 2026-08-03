@@ -1922,7 +1922,7 @@ class FeishuAdapter(BasePlatformAdapter):
             self._webhook_site = None
 
     # =========================================================================
-    # Outbound — send / edit / send_image / send_voice / …
+    # Outbound — send / edit / send_image / …
     # =========================================================================
 
     async def send(
@@ -5568,7 +5568,6 @@ def _qr_register_inner(
 _MIGRATION_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 _MIGRATION_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp"}
 _MIGRATION_AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac"}
-_MIGRATION_VOICE_EXTS = {".ogg", ".opus"}
 
 
 async def _standalone_send(
@@ -5612,10 +5611,8 @@ async def _standalone_send(
                 last_result = await adapter.send_image_file(chat_id, media_path, metadata=metadata)
             elif ext in _MIGRATION_VIDEO_EXTS:
                 last_result = await adapter.send_video(chat_id, media_path, metadata=metadata)
-            elif ext in _MIGRATION_VOICE_EXTS and is_voice:
-                last_result = await adapter.send_voice(chat_id, media_path, metadata=metadata)
             elif ext in _MIGRATION_AUDIO_EXTS:
-                last_result = await adapter.send_voice(chat_id, media_path, metadata=metadata)
+                last_result = await adapter.send_document(chat_id, media_path, metadata=metadata)
             else:
                 last_result = await adapter.send_document(chat_id, media_path, metadata=metadata)
             if not last_result.success:

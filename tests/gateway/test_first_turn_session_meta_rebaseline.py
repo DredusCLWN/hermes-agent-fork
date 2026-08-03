@@ -80,7 +80,6 @@ def _bootstrap(monkeypatch, tmp_path, db):
     runner._begin_session_run_generation = lambda _key: 1
     runner._reply_anchor_for_event = lambda _event: None
     runner._get_guild_id = lambda _event: None
-    runner._should_send_voice_reply = lambda *_a, **_kw: False
     runner.hooks = MagicMock()
     runner.hooks.emit = AsyncMock()
 

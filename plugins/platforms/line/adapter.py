@@ -47,7 +47,7 @@ a single plugin-form module that requires zero core edits:
 * PR #18153 (leepoweii)   — Template Buttons postback cache state machine,
   Markdown URL preservation, system-message bypass.
 * PR #8398  (yuga-hashimoto) — media URL serving with traversal guard,
-  send_voice / send_video, ``LINE_PUBLIC_URL`` env, macOS ``/tmp`` root.
+  send_video, ``LINE_PUBLIC_URL`` env, macOS ``/tmp`` root.
 * PR #16832 (jethac)      — config wiring style, voice/image tests.
 * PR #21023 (perng)       — plugin-form skeleton (the only one already
   modeled on ``ADDING_A_PLATFORM.md``), reply→push fallback at 50s TTL,

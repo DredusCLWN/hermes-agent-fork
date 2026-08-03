@@ -740,27 +740,6 @@ class TestMediaDeliveryDefaultMode:
 
 
 # ---------------------------------------------------------------------------
-# should_send_media_as_audio
-# ---------------------------------------------------------------------------
-
-class TestShouldSendMediaAsAudio:
-    """Audio-routing policy shared by gateway + scheduler + send_message."""
-
-    def test_unknown_extension_returns_false(self):
-        from gateway.platforms.base import should_send_media_as_audio
-        assert should_send_media_as_audio(None, ".png") is False
-        assert should_send_media_as_audio("telegram", ".pdf") is False
-
-
-    def test_telegram_ogg_opus_only_when_voice_flagged(self):
-        from gateway.platforms.base import should_send_media_as_audio
-        assert should_send_media_as_audio("telegram", ".ogg", is_voice=True) is True
-        assert should_send_media_as_audio("telegram", ".opus", is_voice=True) is True
-        assert should_send_media_as_audio("telegram", ".ogg") is False
-        assert should_send_media_as_audio("telegram", ".opus") is False
-
-
-# ---------------------------------------------------------------------------
 # truncate_message
 # ---------------------------------------------------------------------------
 
@@ -1001,7 +980,7 @@ class TestMediaDeliveryDiagnosability:
 class _CapturingAdapter(BasePlatformAdapter):
     """Minimal concrete BasePlatformAdapter that records what send() sees.
 
-    The four media-send fallbacks (send_voice, send_video, send_document,
+    The three media-send fallbacks (send_video, send_document,
     send_image_file) historically forwarded their *_path argument into the
     chat text. That argument is a host filesystem path inside the Hermes
     cache, so any subclass that fell back to super() — like the Telegram

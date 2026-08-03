@@ -220,8 +220,6 @@ def make_runner(platform: Platform, session_entry: SessionEntry = None) -> "Gate
     runner._is_user_authorized = lambda _source: True
     runner._set_session_env = lambda _context: None
     runner._handle_message_with_agent = AsyncMock(return_value="agent-handled-default")
-    runner._should_send_voice_reply = lambda *_a, **_kw: False
-    runner._send_voice_reply = AsyncMock()
     runner._capture_gateway_honcho_if_configured = lambda *a, **kw: None
     runner._emit_gateway_run_progress = AsyncMock()
 

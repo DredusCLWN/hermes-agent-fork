@@ -1159,7 +1159,7 @@ class WhatsAppCloudAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
 
         ``**kwargs`` absorbs platform-agnostic args the base class passes
         (e.g. ``metadata``) that the Cloud API doesn't have a use for.
-        Mirrors send_image_file / send_video / send_voice / send_document.
+        Mirrors send_image_file / send_video / send_document.
         """
         return await self._send_media_from_path_or_link(
             chat_id, image_url, "image", caption=caption, reply_to=reply_to

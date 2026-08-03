@@ -823,7 +823,6 @@ class SimplexAdapter(BasePlatformAdapter):
         waiting for one would serialise all outbound traffic behind a
         30-second timeout.
         """
-        _voice_exts = {".ogg", ".mp3", ".wav", ".m4a", ".opus"}
         media_paths = re.findall(r"MEDIA:(\S+)", content)
         if media_paths:
             content = re.sub(r"MEDIA:\S+", "", content).strip()
@@ -843,11 +842,7 @@ class SimplexAdapter(BasePlatformAdapter):
             await self._send_ws({"corrId": corr_id, "cmd": cmd_str})
 
         for path in media_paths:
-            is_voice = os.path.splitext(path)[1].lower() in _voice_exts
-            if is_voice:
-                media_result = await self.send_voice(chat_id, path)
-            else:
-                media_result = await self.send_document(chat_id, path)
+            media_result = await self.send_document(chat_id, path)
             if not media_result.success:
                 return media_result
 

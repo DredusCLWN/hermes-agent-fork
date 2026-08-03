@@ -237,7 +237,6 @@ def _stream_adapter():
         name="test",
         extract_media=BasePlatformAdapter.extract_media,
         extract_images=BasePlatformAdapter.extract_images,
-        send_voice=AsyncMock(return_value=SendResult(success=True, message_id="v")),
         send_document=AsyncMock(return_value=SendResult(success=True, message_id="d")),
         send_image_file=AsyncMock(return_value=SendResult(success=True, message_id="i")),
         send_video=AsyncMock(return_value=SendResult(success=True, message_id="vid")),

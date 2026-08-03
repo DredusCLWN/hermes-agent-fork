@@ -440,53 +440,6 @@ class TestSignalRecipientResolution:
 
 
 # ---------------------------------------------------------------------------
-# send_voice method (#5105)
-# ---------------------------------------------------------------------------
-
-class TestSignalSendVoice:
-    @pytest.mark.asyncio
-    async def test_send_voice_sends_via_rpc(self, monkeypatch, tmp_path):
-        """send_voice should send audio as attachment via signal-cli RPC."""
-        adapter = _make_signal_adapter(monkeypatch)
-        mock_rpc, captured = _stub_rpc({"timestamp": 1234567890})
-        adapter._rpc = mock_rpc
-        adapter._stop_typing_indicator = AsyncMock()
-
-        audio_path = tmp_path / "reply.ogg"
-        audio_path.write_bytes(b"OggS" + b"\x00" * 100)
-
-        result = await adapter.send_voice(chat_id="+155****4567", audio_path=str(audio_path))
-
-        assert result.success is True
-        assert captured[0]["method"] == "send"
-        assert captured[0]["params"]["attachments"] == [str(audio_path)]
-        assert captured[0]["params"]["message"] == ""  # caption=None → ""
-        adapter._stop_typing_indicator.assert_awaited_once_with("+155****4567")
-        assert 1234567890 in adapter._recent_sent_timestamps
-
-
-    @pytest.mark.asyncio
-    async def test_send_voice_too_large(self, monkeypatch, tmp_path):
-        """send_voice should reject files over 100MB."""
-        adapter = _make_signal_adapter(monkeypatch)
-        adapter._stop_typing_indicator = AsyncMock()
-
-        audio_path = tmp_path / "huge.ogg"
-        audio_path.write_bytes(b"x")
-
-        def mock_stat(self, **kwargs):
-            class FakeStat:
-                st_size = 200 * 1024 * 1024
-            return FakeStat()
-
-        with patch.object(Path, "stat", mock_stat):
-            result = await adapter.send_voice(chat_id="+155****4567", audio_path=str(audio_path))
-
-        assert result.success is False
-        assert "too large" in result.error.lower()
-
-
-# ---------------------------------------------------------------------------
 # send_video method (#5105)
 # ---------------------------------------------------------------------------
 
@@ -517,7 +470,7 @@ class TestSignalSendVideo:
 # ---------------------------------------------------------------------------
 
 class TestSignalMediaExtraction:
-    """Verify the full pipeline: MEDIA: tag → extract → send_image_file/send_voice."""
+    """Verify the full pipeline: MEDIA: tag → extract → send_image_file/send_document."""
 
     def test_extract_media_finds_image_tag(self):
         """BasePlatformAdapter.extract_media should find MEDIA: image paths."""

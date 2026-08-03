@@ -1209,7 +1209,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         ``metadata`` is accepted to honor the base-class contract — the
         batch sender ``send_multiple_images`` passes it through to every
         send path. The bridge media call doesn't use it, matching the
-        sibling overrides (send_video / send_voice / send_document).
+        sibling overrides (send_video / send_document).
         """
         try:
             local_path = await cache_image_from_url(image_url)

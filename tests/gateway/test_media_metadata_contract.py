@@ -24,7 +24,7 @@ def _accepts_metadata(method) -> bool:
     if "metadata" in params:
         return True
     # A ``**kwargs`` catch-all also absorbs metadata (the convention used by
-    # WhatsApp's send_video / send_voice / send_document overrides).
+    # WhatsApp's send_video / send_document overrides).
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 

@@ -64,10 +64,8 @@ _HOME_CHANNEL_ENV_OVERRIDES = {"email": "EMAIL_HOME_ADDRESS"}
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp"}
 _AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".m2a", ".wav", ".m4a", ".flac"}
-_VOICE_EXTS = {".ogg", ".opus"}
 # Telegram's Bot API sendAudio only accepts MP3 / M4A. Other audio
-# formats either route through sendVoice (Opus/OGG) or fall back to
-# document delivery.
+# formats fall back to document delivery.
 _TELEGRAM_SEND_AUDIO_EXTS = {".mp3", ".m4a"}
 
 # Extensions that carry a native caption on the media bubble itself
@@ -627,8 +625,6 @@ def _describe_media_for_mirror(media_files):
     if len(media_files) == 1:
         media_path, is_voice = media_files[0]
         ext = os.path.splitext(media_path)[1].lower()
-        if is_voice and ext in _VOICE_EXTS:
-            return "[Sent voice message]"
         if ext in _IMAGE_EXTS:
             return "[Sent image attachment]"
         if ext in _VIDEO_EXTS:
@@ -1370,11 +1366,11 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
                     # Attach the MEDIA:<path> caption to the bubble itself for
                     # captionable kinds (photo/video/document). _tg_caption is
                     # only set for a single captionable file, so this never
-                    # double-captions a multi-file send or a voice note.
-                    if _tg_caption is not None and not (ext in _VOICE_EXTS and is_voice):
+                    # double-captions a multi-file send.
+                    if _tg_caption is not None:
                         media_kwargs["caption"] = _tg_caption
                         media_kwargs["parse_mode"] = send_parse_mode
-                    if (ext in _VOICE_EXTS and is_voice) or ext in _TELEGRAM_SEND_AUDIO_EXTS:
+                    if ext in _TELEGRAM_SEND_AUDIO_EXTS:
                         try:
                             from plugins.platforms.telegram.adapter import _probe_voice_duration_seconds
                             duration = await asyncio.to_thread(_probe_voice_duration_seconds, media_path)
@@ -1390,10 +1386,6 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
                         elif ext in _VIDEO_EXTS:
                             last_msg = await bot.send_video(
                                 chat_id=int_chat_id, video=f, **media_kwargs
-                            )
-                        elif ext in _VOICE_EXTS and is_voice:
-                            last_msg = await bot.send_voice(
-                                chat_id=int_chat_id, voice=f, **media_kwargs
                             )
                         elif ext in _TELEGRAM_SEND_AUDIO_EXTS:
                             last_msg = await bot.send_audio(
@@ -1421,10 +1413,6 @@ async def _send_telegram(token, chat_id, message, media_files=None, thread_id=No
                             elif ext in _VIDEO_EXTS:
                                 last_msg = await bot.send_video(
                                     chat_id=int_chat_id, video=f, **media_kwargs
-                                )
-                            elif ext in _VOICE_EXTS and is_voice:
-                                last_msg = await bot.send_voice(
-                                    chat_id=int_chat_id, voice=f, **media_kwargs
                                 )
                             elif ext in _TELEGRAM_SEND_AUDIO_EXTS:
                                 last_msg = await bot.send_audio(
@@ -1886,10 +1874,8 @@ async def _matrix_send_core(adapter, chat_id, message, media_files, metadata):
             last_result = await adapter.send_image_file(chat_id, media_path, metadata=metadata)
         elif ext in _VIDEO_EXTS:
             last_result = await adapter.send_video(chat_id, media_path, metadata=metadata)
-        elif ext in _VOICE_EXTS and is_voice:
-            last_result = await adapter.send_voice(chat_id, media_path, metadata=metadata)
         elif ext in _AUDIO_EXTS:
-            last_result = await adapter.send_voice(chat_id, media_path, metadata=metadata)
+            last_result = await adapter.send_document(chat_id, media_path, metadata=metadata)
         else:
             last_result = await adapter.send_document(chat_id, media_path, metadata=metadata)
 

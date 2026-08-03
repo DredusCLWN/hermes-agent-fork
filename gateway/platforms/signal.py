@@ -1422,7 +1422,7 @@ class SignalAdapter(BasePlatformAdapter):
     ) -> SendResult:
         """Send any file as a Signal attachment via RPC.
 
-        Shared implementation for send_document, send_image_file, send_voice,
+        Shared implementation for send_document, send_image_file,
         and send_video — avoids duplicating the validation/routing/RPC logic.
         """
         await self._stop_typing_indicator(chat_id)
