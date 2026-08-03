@@ -71,43 +71,7 @@ def _(rid, params: dict) -> dict:
     sid = params.get("session_id", "")
     raw_text = params.get("text", "")
     text = sanitize_user_prompt_text(raw_text) if isinstance(raw_text, str) else raw_text
-    # Typed bare stop phrase while backend voice mode is active ends the
-    # voice chat instead of sending "stop" to the agent — the typed twin of
-    # the spoken stop phrase (PR #73106), applied at the ONE server-side
-    # choke point every TUI submit passes through. Guarded on voice mode
-    # being ON: typed "stop" outside a voice chat is a normal message.
-    # (The desktop's voice conversation is renderer-owned and never flips
-    # the backend flag, so it handles its own typed stop client-side.)
-    if isinstance(text, str) and _voice_mode_enabled():
-        try:
-            from tools.voice_mode import is_voice_stop_phrase
-
-            typed_stop = is_voice_stop_phrase(text)
-        except Exception:
-            typed_stop = False
-        if typed_stop:
-            os.environ["HERMES_VOICE"] = "0"
-            os.environ["HERMES_VOICE_TTS"] = "0"
-            try:
-                from hermes_cli.voice import stop_continuous
-
-                stop_continuous()
-            except Exception:
-                pass
-            try:
-                _tts_stream_stop(user_barge=False)
-            except Exception:
-                pass
-            _voice_emit("voice.transcript", {"stop_phrase": True, "typed": True})
-            logger.info("prompt.submit: typed stop phrase — voice chat ended")
-            return _ok(rid, {"voice_stopped": True})
     truncate_user_ordinal = params.get("truncate_before_user_ordinal")
-    if params.get("interrupted"):
-        # Client-side barge-in (desktop VAD / typing over playback) — latch it
-        # so this turn's model message carries the interruption note.
-        from tools.tts_streaming import mark_speech_interrupted
-
-        mark_speech_interrupted()
     session, err = _sess_nowait(params, rid)
     if err:
         return err

@@ -2705,9 +2705,6 @@ def _(rid, params: dict) -> dict:
 
 @method("session.interrupt")
 def _(rid, params: dict) -> dict:
-    # Keypress barge-in: stopping the turn also silences its streaming TTS
-    # (voice is process-global, so no per-session scoping is needed).
-    _tts_stream_stop()
     session, err = _sess_nowait(params, rid)
     if err:
         return err
