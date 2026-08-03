@@ -4316,11 +4316,6 @@ class TurnRunner:
         # Set up stream consumer for token streaming or interim commentary.
         _stream_consumer = None
         _stream_delta_cb = None
-        # #60671 — streaming TTS consumer is created on the outer
-        # event-loop thread before run_sync launches.  run_sync only
-        # reads it via ``streaming_tts_consumer_holder[0]`` for delta
-        # callback wiring.
-        _stts_consumer_ref = ctx.streaming_tts_consumer_holder[0]
         _scfg = getattr(getattr(self._runner, 'config', None), 'streaming', None)
         if _scfg is None:
             from gateway.config import StreamingConfig
@@ -23665,15 +23660,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         result_holder = [None]  # Mutable container for the result
         tools_holder = [None]   # Mutable container for the tool definitions
         stream_consumer_holder = [None]  # Mutable container for stream consumer
-        # #60671 — streaming PCM audio consumer.  Created on the gateway
-        # event-loop thread (NOT inside run_sync's executor worker) so the
-        # outer finalisation / interrupt paths can reference it without a
-        # cross-scope NameError.
-        streaming_tts_consumer_holder: list = [None]
         turn_ctx.result_holder = result_holder
         turn_ctx.tools_holder = tools_holder
         turn_ctx.stream_consumer_holder = stream_consumer_holder
-        turn_ctx.streaming_tts_consumer_holder = streaming_tts_consumer_holder
         
         # Bridge sync step_callback → async hooks.emit for agent:step events
         _loop_for_step = asyncio.get_running_loop()
@@ -23844,10 +23833,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             logger.debug("Interrupt detected from adapter, signaling agent...")
                             agent.interrupt(pending_text)
                             _interrupt_detected.set()
-                            # Abort streaming TTS on barge-in (#60671).
-                            _stts = streaming_tts_consumer_holder[0]
-                            if _stts is not None:
-                                _stts.abort("barge-in")
                             break
                 except asyncio.CancelledError:
                     raise
@@ -24130,10 +24115,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             )
                             _backup_agent.interrupt(_bp_text)
                             _interrupt_detected.set()
-                            # Abort streaming TTS on barge-in (#60671).
-                            _stts = streaming_tts_consumer_holder[0]
-                            if _stts is not None:
-                                _stts.abort("barge-in")
 
             else:
                 # Poll loop: check the agent's built-in activity tracker
@@ -24232,10 +24213,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             )
                             _backup_agent.interrupt(_bp_text)
                             _interrupt_detected.set()
-                            # Abort streaming TTS on barge-in (#60671).
-                            _stts = streaming_tts_consumer_holder[0]
-                            if _stts is not None:
-                                _stts.abort("barge-in")
 
             if _inactivity_timeout:
                 # Build a diagnostic summary from the agent's activity tracker.
@@ -24340,33 +24317,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             result = result_holder[0]
             adapter = self._adapter_for_source(source)
 
-            # Finalize the streaming-TTS consumer (#60671).
-            #
-            # finish() is called from the outer event-loop thread (not the
-            # executor worker) so early returns from run_sync are also
-            # finalised.  wait_complete() drains queued audio; on timeout
-            # the consumer is aborted unconditionally — if audio was
-            # audible, suppression is preserved so the gateway does not
-            # replay from the beginning; if no audio was audible, the
-            # whole-file fallback path is permitted.
-            _stts = streaming_tts_consumer_holder[0]
-            if _stts is not None:
-                _stts.finish()
-                try:
-                    await _stts.wait_complete(timeout=10.0)
-                except Exception as _stts_done_err:
-                    logger.debug("streaming TTS wait_complete error: %s", _stts_done_err)
-                if not _stts.done:
-                    # Timeout before or after audible audio: abort to free
-                    # the consumer task.  Audible streams retain suppression;
-                    # silent streams remain eligible for whole-file fallback.
-                    _stts.abort("streaming TTS finalisation timeout")
-                    await _stts.wait_complete(timeout=2.0)
-                if _stts.suppress_whole_file and adapter is not None:
-                    _mark_turn = getattr(adapter, "_mark_streaming_tts_completed_turn", None)
-                    if callable(_mark_turn):
-                        _mark_turn(session_key, run_generation)
-            
             # Get pending message from adapter.
             # Use session_key (not source.chat_id) to match adapter's storage keys.
             pending_event = None
@@ -24708,17 +24658,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         except asyncio.CancelledError:
                             pass
             
-            # Unconditional abort + bounded wait for the streaming-TTS
-            # consumer (#60671 hardening).  Covers cancellation / exception
-            # paths where the normal finalisation block was skipped.
-            _stts_finally = streaming_tts_consumer_holder[0]
-            if _stts_finally is not None and not _stts_finally.done:
-                _stts_finally.abort("cleanup")
-                try:
-                    await _stts_finally.wait_complete(timeout=2.0)
-                except Exception:
-                    pass
-
             # Clean up tracking
             tracking_task.cancel()
             if session_key:

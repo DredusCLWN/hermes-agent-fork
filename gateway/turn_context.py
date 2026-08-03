@@ -107,7 +107,6 @@ class TurnContext:
     result_holder: list = field(default_factory=lambda: [None])
     tools_holder: list = field(default_factory=lambda: [None])
     stream_consumer_holder: list = field(default_factory=lambda: [None])
-    streaming_tts_consumer_holder: list = field(default_factory=lambda: [None])
 
     # --- voice-ack wiring --------------------------------------------------
     _voice_ack_fired: list = field(default_factory=lambda: [False])
