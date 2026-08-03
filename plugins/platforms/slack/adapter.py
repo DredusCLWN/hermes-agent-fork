@@ -4102,33 +4102,6 @@ class SlackAdapter(BasePlatformAdapter):
                 metadata=metadata,
             )
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ) -> SendResult:
-        """Send an audio file to Slack."""
-        try:
-            return await self._upload_file(
-                chat_id, audio_path, caption, reply_to, metadata
-            )
-        except FileNotFoundError:
-            return SendResult(
-                success=False, error=f"Audio file not found: {audio_path}"
-            )
-        except Exception as e:  # pragma: no cover - defensive logging
-            logger.error(
-                "[Slack] Failed to send audio file %s: %s",
-                audio_path,
-                e,
-                exc_info=True,
-            )
-            return SendResult(success=False, error=str(e))
-
     async def send_video(
         self,
         chat_id: str,
