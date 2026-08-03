@@ -15328,40 +15328,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             image_paths,
                         )
 
-            if audio_paths:
-                message_text, _successful_transcripts = await self._enrich_message_with_transcription(
-                    message_text,
-                    audio_paths,
-                )
-                # Echo each successful transcript back to the user immediately
-                # when configured. Lets users verify STT quality in real-time,
-                # while allowing quiet STT for users who only want the agent to
-                # receive the transcription.
-                if _successful_transcripts and self._should_echo_stt_transcripts():
-                    _echo_adapter = self._adapter_for_source(source)
-                    _echo_meta = self._thread_metadata_for_source(source, self._reply_anchor_for_event(event))
-                    if _echo_adapter:
-                        for _tx in _successful_transcripts:
-                            try:
-                                await _echo_adapter.send(
-                                    source.chat_id,
-                                    f'🎙️ "{_tx}"',
-                                    metadata=_echo_meta,
-                                )
-                            except Exception as _echo_exc:
-                                logger.debug(
-                                    "Transcript echo failed (non-fatal): %s", _echo_exc,
-                                )
-                # NOTE: Previously, when transcription failed (e.g. no STT
-                # provider configured), the gateway also emitted a hardcoded
-                # English notice via `_stt_adapter.send()`. That bypassed the
-                # LLM and produced two replies — one pre-canned English clip
-                # (which TTS then spoke aloud, in the wrong language) and one
-                # correct, localized LLM reply from the enriched message text.
-                # The enrichment step now leaves a single neutral marker in the
-                # prompt, so the LLM produces one coherent reply in the user's
-                # language. The hardcoded send has therefore been removed.
-
         if audio_file_paths:
             from tools.credential_files import to_agent_visible_cache_path as _to_agent_path
             for _apath in audio_file_paths:
@@ -17423,20 +17389,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 )
                 response = ""
 
-            # Auto voice reply: send TTS audio before the text response
-            _already_sent = bool(agent_result.get("already_sent"))
-            # Skip when streaming TTS already delivered audio for this turn (#60671).
-            _stts_adapter = self._adapter_for_source(source)
-            _streaming_tts_done = (
-                _stts_adapter is not None
-                and bool(getattr(_stts_adapter, "_streaming_tts_turn_completed", lambda *_a, **_k: False)(session_key, run_generation))
-            )
-            if (
-                not _streaming_tts_done
-                and self._should_send_voice_reply(event, response, agent_messages, already_sent=_already_sent)
-            ):
-                await self._send_voice_reply(event, response)
-
             # If streaming already delivered the response, extract and
             # deliver any MEDIA: files before returning None.  Streaming
             # sends raw text chunks that include MEDIA: tags — the normal
@@ -18393,159 +18345,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         )
 
         await adapter.handle_message(event)
-
-    def _should_send_voice_reply(
-        self,
-        event: MessageEvent,
-        response: str,
-        agent_messages: list,
-        already_sent: bool = False,
-    ) -> bool:
-        """Decide whether the runner should send a TTS voice reply.
-
-        Returns False when:
-        - voice_mode is off for this chat
-        - response is empty or an error
-        - agent already called text_to_speech tool (dedup)
-        - voice input and base adapter auto-TTS already handled it (skip_double)
-          UNLESS streaming already consumed the response (already_sent=True),
-          in which case the base adapter won't have text for auto-TTS so the
-          runner must handle it.
-        """
-        if not response or response.startswith("Error:"):
-            return False
-
-        chat_id = event.source.chat_id
-        voice_key = self._voice_key(event.source.platform, chat_id)
-        voice_mode = self._voice_mode.get(voice_key)
-        is_voice_input = (event.message_type == MessageType.VOICE)
-
-        adapter = self.adapters.get(event.source.platform)
-        adapter_auto_tts = False
-        if adapter and hasattr(adapter, "_should_auto_tts_for_chat"):
-            try:
-                adapter_auto_tts = bool(adapter._should_auto_tts_for_chat(chat_id))
-            except Exception:
-                adapter_auto_tts = False
-
-        should = (
-            (voice_mode == "all")
-            or (voice_mode == "voice_only" and is_voice_input)
-            # ``voice.auto_tts`` is synced into the adapter on gateway startup.
-            # It is the fallback only when the chat has no explicit mode;
-            # otherwise the chat-level all/voice_only/off choice takes precedence.
-            or (voice_mode is None and adapter_auto_tts)
-        )
-        if not should:
-            logger.debug(
-                "Auto voice reply skipped: mode=%s adapter_auto_tts=%s chat=%s platform=%s",
-                voice_mode, adapter_auto_tts, chat_id, event.source.platform.value,
-            )
-            return False
-
-        # Dedup: agent already called TTS tool in THIS turn only
-        last_user_idx = None
-        for i, msg in enumerate(reversed(agent_messages)):
-            if msg.get("role") == "user":
-                last_user_idx = len(agent_messages) - 1 - i; break
-        turn_messages = agent_messages[last_user_idx:] if last_user_idx is not None else agent_messages
-        has_agent_tts = any(
-            msg.get("role") == "assistant"
-            and any(
-                (tc.get("function") or {}).get("name") == "text_to_speech"
-                for tc in (msg.get("tool_calls") or [])
-            )
-            for msg in turn_messages
-        )
-        if has_agent_tts:
-            return False
-
-        # Dedup: base adapter auto-TTS already handles voice input
-        # (play_tts plays in VC when connected, so runner can skip).
-        # When streaming already delivered the text (already_sent=True),
-        # the base adapter will receive None and can't run auto-TTS,
-        # so the runner must take over.
-        if is_voice_input and not already_sent:
-            return False
-
-        return True
-
-    def _should_echo_stt_transcripts(self) -> bool:
-        """Return whether inbound voice/STT transcripts should be echoed to chat."""
-        return bool(getattr(self.config, "stt_echo_transcripts", True))
-
-    async def _send_voice_reply(self, event: MessageEvent, text: str) -> None:
-        """Generate TTS audio and send as a voice message before the text reply."""
-        audio_path = None
-        actual_path = None
-        try:
-            from tools.tts_tool import text_to_speech_tool, _strip_markdown_for_tts
-
-            tts_text = _strip_markdown_for_tts(text[:4000])
-            if not tts_text:
-                return
-
-            # Platform-aware output path: platforms whose native voice
-            # bubbles require Ogg/Opus (OPUS_VOICE_PLATFORMS — Telegram,
-            # Matrix, Feishu, WhatsApp, Signal) get an explicit .ogg path;
-            # the TTS tool's central container repair guarantees real
-            # Ogg/Opus bytes for every provider. Others keep MP3.
-            audio_path = build_auto_tts_output_path(event.source.platform)
-
-            result_json = await asyncio.to_thread(
-                text_to_speech_tool, text=tts_text, output_path=audio_path
-            )
-            try:
-                result = json.loads(result_json)
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("Auto voice reply TTS returned invalid JSON: %s", result_json[:200] if result_json else result_json)
-                return
-
-            # Use the actual file path from result (may differ after opus conversion)
-            actual_path = result.get("file_path", audio_path)
-            if not result.get("success") or not os.path.isfile(actual_path):
-                logger.warning("Auto voice reply TTS failed: %s", result.get("error"))
-                return
-
-            adapter = self._adapter_for_source(event.source)
-
-            # If connected to a voice channel, play there instead of sending a file
-            guild_id = self._get_guild_id(event)
-            if (guild_id
-                    and hasattr(adapter, "play_in_voice_channel")
-                    and hasattr(adapter, "is_in_voice_channel")
-                    and adapter.is_in_voice_channel(guild_id)):
-                await adapter.play_in_voice_channel(guild_id, actual_path)
-            elif adapter and hasattr(adapter, "send_voice"):
-                reply_anchor = self._reply_anchor_for_event(event)
-                thread_meta = self._thread_metadata_for_source(event.source, reply_anchor)
-                # Mark the auto voice reply as notify-worthy.  Mirrors the
-                # final-text path in gateway/platforms/base.py which sets
-                # ``notify=True`` so platform adapters that gate push
-                # notifications (Telegram "important" mode) deliver the
-                # final voice reply as a normal notification instead of a
-                # silent message.  Clone first so we don't mutate metadata
-                # shared with concurrent typing-indicator state.
-                if thread_meta is not None:
-                    thread_meta = dict(thread_meta)
-                    thread_meta["notify"] = True
-                else:
-                    thread_meta = {"notify": True}
-                send_kwargs: Dict[str, Any] = {
-                    "chat_id": event.source.chat_id,
-                    "audio_path": actual_path,
-                    "reply_to": reply_anchor,
-                    "metadata": thread_meta,
-                }
-                await adapter.send_voice(**send_kwargs)
-        except Exception as e:
-            logger.warning("Auto voice reply failed: %s", e, exc_info=True)
-        finally:
-            for p in {audio_path, actual_path} - {None}:
-                try:
-                    os.unlink(p)
-                except OSError:
-                    pass
 
     async def _deliver_media_from_response(
         self,
@@ -23923,44 +23722,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         turn_ctx._status_chat_id = _status_chat_id
         turn_ctx._status_thread_metadata = _status_thread_metadata
         turn_ctx._status_callback_sync = turn_runner._status_callback_sync
-
-        # ---- Streaming TTS consumer setup (#60671) ----
-        # Created on the gateway event-loop thread (here, in _run_agent_inner),
-        # NOT inside run_sync's executor worker.  This avoids a cross-scope
-        # NameError: the outer interrupt / finalisation paths reference the
-        # consumer via ``streaming_tts_consumer_holder[0]``.
-        #
-        # Gates: voice input, auto-TTS enabled for this chat, adapter
-        # supports streaming, and a usable streaming TTS provider configured.
-        _stts_adapter = self._adapter_for_source(source)
-        _is_voice_input = (
-            message_type is not None
-            and str(getattr(message_type, "value", message_type)).lower() == "voice"
-        )
-        if (
-            _stts_adapter is not None
-            and _is_voice_input
-            and _stts_adapter._should_auto_tts_for_chat(source.chat_id)
-        ):
-            try:
-                from gateway.streaming_tts_consumer import StreamingTTSConsumer
-                from tools.tts_tool import _load_tts_config
-                _tts_cfg = _load_tts_config()
-                _gateway_loop = self._gateway_loop or asyncio.get_event_loop()
-                _stts_consumer = StreamingTTSConsumer(
-                    adapter=_stts_adapter,
-                    chat_id=source.chat_id,
-                    tts_config=_tts_cfg,
-                    loop=_gateway_loop,
-                    metadata=_status_thread_metadata,
-                )
-                if _stts_consumer.active:
-                    streaming_tts_consumer_holder[0] = _stts_consumer
-                    _stts_consumer.start()
-                # else: consumer inactive (no streaming provider) — leave
-                # the holder as None so the whole-file fallback path runs.
-            except Exception as _stts_err:
-                logger.debug("Could not set up streaming TTS consumer: %s", _stts_err)
 
         # run_sync extracted to TurnRunner.run_sync (bound method; the
         # executor call below is unchanged).  Its closed-over locals travel
