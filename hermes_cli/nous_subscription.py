@@ -38,10 +38,6 @@ MANAGED_FEATURE_COVERAGE_CATEGORY: Dict[str, str] = {
     "web": "firecrawl",
     "image_gen": "fal",
     "video_gen": "fal-video",
-    "tts": "openai-audio",
-    # STT shares the TTS coverage category: both ride the managed
-    # "openai-audio" gateway endpoint (speech + transcriptions).
-    "stt": "openai-audio",
     "browser": "browser-use",
     "modal": "modal",
 }
@@ -85,14 +81,6 @@ class NousSubscriptionFeatures:
         return self.features["image_gen"]
 
     @property
-    def tts(self) -> NousFeatureState:
-        return self.features["tts"]
-
-    @property
-    def stt(self) -> NousFeatureState:
-        return self.features["stt"]
-
-    @property
     def browser(self) -> NousFeatureState:
         return self.features["browser"]
 
@@ -105,7 +93,7 @@ class NousSubscriptionFeatures:
         return self.features["modal"]
 
     def items(self) -> Iterable[NousFeatureState]:
-        ordered = ("web", "image_gen", "video_gen", "tts", "stt", "browser", "modal")
+        ordered = ("web", "image_gen", "video_gen", "browser", "modal")
         for key in ordered:
             yield self.features[key]
 
@@ -228,45 +216,6 @@ def _browser_label(current_provider: str) -> str:
     return mapping.get(current_provider or "local", current_provider or "Local browser")
 
 
-def _tts_label(current_provider: str) -> str:
-    mapping = {
-        "openai": "OpenAI TTS",
-        "elevenlabs": "ElevenLabs",
-        "edge": "Edge TTS",
-        "xai": "xAI TTS",
-        "mistral": "Mistral Voxtral TTS",
-        "neutts": "NeuTTS",
-    }
-    return mapping.get(current_provider or "edge", current_provider or "Edge TTS")
-
-
-def _stt_label(current_provider: str) -> str:
-    mapping = {
-        "openai": "OpenAI Whisper",
-        "groq": "Groq Whisper",
-        "mistral": "Mistral Voxtral Transcribe",
-        "local": "Local faster-whisper",
-    }
-    return mapping.get(current_provider or "local", current_provider or "Local faster-whisper")
-
-
-def _local_stt_backend_available() -> bool:
-    """Whether a local STT backend could serve transcription right now.
-
-    True when faster-whisper is importable or a custom local STT command
-    is configured. Used both for feature detection and to stop
-    ``apply_nous_managed_defaults`` from flipping a working local setup
-    to the managed gateway.
-    """
-    if get_env_value("HERMES_LOCAL_STT_COMMAND"):
-        return True
-    try:
-        from tools.transcription_tools import _HAS_FASTER_WHISPER
-
-        return bool(_HAS_FASTER_WHISPER)
-    except Exception:
-        return False
-
 
 def _resolve_browser_feature_state(
     *,
@@ -380,13 +329,10 @@ def get_nous_subscription_features(
     web_tool_enabled = _toolset_enabled(config, "web")
     image_tool_enabled = _toolset_enabled(config, "image_gen")
     video_tool_enabled = _toolset_enabled(config, "video_gen")
-    tts_tool_enabled = _toolset_enabled(config, "tts")
     browser_tool_enabled = _toolset_enabled(config, "browser")
     modal_tool_enabled = _toolset_enabled(config, "terminal")
 
     web_cfg = config.get("web") if isinstance(config.get("web"), dict) else {}
-    tts_cfg = config.get("tts") if isinstance(config.get("tts"), dict) else {}
-    stt_cfg = config.get("stt") if isinstance(config.get("stt"), dict) else {}
     browser_cfg = config.get("browser") if isinstance(config.get("browser"), dict) else {}
     terminal_cfg = config.get("terminal") if isinstance(config.get("terminal"), dict) else {}
 
@@ -394,12 +340,6 @@ def get_nous_subscription_features(
     # Per-capability overrides: if set, they determine which backend is active for
     # search/extract independently of web.backend.
     web_search_backend = str(web_cfg.get("search_backend") or "").strip().lower()
-    tts_provider = str(tts_cfg.get("provider") or "edge").strip().lower()
-    # STT default is "local" (faster-whisper) per DEFAULT_CONFIG, which
-    # requires `pip install faster-whisper`. For Nous subscribers we'd
-    # rather route through the managed OpenAI audio gateway — see
-    # apply_nous_managed_defaults below.
-    stt_provider = str(stt_cfg.get("provider") or "local").strip().lower()
     browser_provider_explicit = "cloud_provider" in browser_cfg
     browser_provider = normalize_browser_cloud_provider(
         browser_cfg.get("cloud_provider") if browser_provider_explicit else None
@@ -415,8 +355,6 @@ def get_nous_subscription_features(
     # Tool Gateway via `hermes model`, so direct credentials should NOT
     # prevent gateway routing.
     web_use_gateway = _uses_gateway(web_cfg)
-    tts_use_gateway = _uses_gateway(tts_cfg)
-    stt_use_gateway = _uses_gateway(stt_cfg)
     browser_use_gateway = _uses_gateway(browser_cfg)
     image_gen_cfg = config.get("image_gen") if isinstance(config.get("image_gen"), dict) else {}
     image_use_gateway = _uses_gateway(image_gen_cfg)
@@ -430,28 +368,10 @@ def get_nous_subscription_features(
     direct_searxng = bool(get_env_value("SEARXNG_URL"))
     direct_fal = fal_key_is_configured()
     direct_fal_video = direct_fal  # same FAL_KEY; separate var so use_gateway is independent
-    direct_openai_tts = bool(resolve_openai_audio_api_key())
-    direct_elevenlabs = bool(get_env_value("ELEVENLABS_API_KEY"))
     direct_camofox = bool(get_env_value("CAMOFOX_URL"))
     direct_browserbase = bool(get_env_value("BROWSERBASE_API_KEY") and get_env_value("BROWSERBASE_PROJECT_ID"))
     direct_browser_use = bool(get_env_value("BROWSER_USE_API_KEY"))
     direct_modal = has_direct_modal_credentials()
-
-    # STT direct providers. OpenAI Whisper reuses the same audio key as
-    # OpenAI TTS — resolve_openai_audio_api_key() reads VOICE_TOOLS_OPENAI_KEY
-    # and falls back to OPENAI_API_KEY. The local provider's "direct"
-    # signal is whether faster-whisper is importable; we lazy-import so
-    # this module stays cheap on the happy path.
-    direct_openai_stt = bool(resolve_openai_audio_api_key())
-    direct_groq_stt = bool(get_env_value("GROQ_API_KEY"))
-    direct_mistral_stt = bool(get_env_value("MISTRAL_API_KEY"))
-    try:
-        from tools.transcription_tools import _HAS_FASTER_WHISPER
-        local_stt_available = bool(_HAS_FASTER_WHISPER) or bool(
-            get_env_value("HERMES_LOCAL_STT_COMMAND")
-        )
-    except Exception:
-        local_stt_available = bool(get_env_value("HERMES_LOCAL_STT_COMMAND"))
 
     # When use_gateway is set, suppress direct credentials for managed detection
     if web_use_gateway:
@@ -463,14 +383,6 @@ def get_nous_subscription_features(
         direct_fal = False
     if video_use_gateway:
         direct_fal_video = False
-    if tts_use_gateway:
-        direct_openai_tts = False
-        direct_elevenlabs = False
-    if stt_use_gateway:
-        direct_openai_stt = False
-        direct_groq_stt = False
-        direct_mistral_stt = False
-        local_stt_available = False
     if browser_use_gateway:
         direct_browser_use = False
         direct_browserbase = False
@@ -496,16 +408,6 @@ def get_nous_subscription_features(
         and is_managed_tool_gateway_ready("fal-queue")
         and _entitled_for("fal-video")
     )
-    managed_tts_available = (
-        managed_tools_flag
-        and nous_auth_present
-        and is_managed_tool_gateway_ready("openai-audio")
-        and _entitled_for("openai-audio")
-    )
-    # STT and TTS share the same managed gateway endpoint ("openai-audio")
-    # because the OpenAI audio API covers both /audio/speech (TTS) and
-    # /audio/transcriptions (STT). One probe (and one entitlement), used by both.
-    managed_stt_available = managed_tts_available
     managed_browser_available = (
         managed_tools_flag
         and nous_auth_present
@@ -555,39 +457,6 @@ def get_nous_subscription_features(
     video_managed = video_tool_enabled and managed_video_available and not direct_fal_video
     video_active = bool(video_tool_enabled and (video_managed or direct_fal_video))
     video_available = bool(managed_video_available or direct_fal_video)
-
-    tts_current_provider = tts_provider or "edge"
-    tts_managed = (
-        tts_tool_enabled
-        and tts_current_provider == "openai"
-        and managed_tts_available
-        and not direct_openai_tts
-    )
-    tts_available = bool(
-        tts_current_provider in {"edge", "neutts"}
-        or (tts_current_provider == "openai" and (managed_tts_available or direct_openai_tts))
-        or (tts_current_provider == "elevenlabs" and direct_elevenlabs)
-        or (tts_current_provider == "mistral" and bool(get_env_value("MISTRAL_API_KEY")))
-    )
-    tts_active = bool(tts_tool_enabled and tts_available)
-
-    # STT availability per provider. Unlike TTS, STT isn't a model-callable
-    # tool — the gateway voice middleware calls it on every inbound voice
-    # message — so toolset_enabled is N/A and we treat stt as always
-    # "enabled" if a usable provider is configured.
-    stt_current_provider = stt_provider or "local"
-    stt_managed = (
-        stt_current_provider == "openai"
-        and managed_stt_available
-        and not direct_openai_stt
-    )
-    stt_available = bool(
-        (stt_current_provider == "local" and local_stt_available)
-        or (stt_current_provider == "openai" and (managed_stt_available or direct_openai_stt))
-        or (stt_current_provider == "groq" and direct_groq_stt)
-        or (stt_current_provider == "mistral" and direct_mistral_stt)
-    )
-    stt_active = stt_available
 
     browser_local_available = _has_agent_browser()
     browser_local_runnable = _local_browser_runnable()
@@ -640,18 +509,6 @@ def get_nous_subscription_features(
         modal_active = False
         modal_direct_override = False
 
-    tts_explicit_configured = False
-    raw_tts_cfg = config.get("tts")
-    if isinstance(raw_tts_cfg, dict) and "provider" in raw_tts_cfg:
-        tts_explicit_configured = tts_provider not in {"", "edge"}
-
-    # STT considers any non-default provider explicit. "local" is the
-    # DEFAULT_CONFIG seed, so seeing it doesn't mean the user picked it.
-    stt_explicit_configured = False
-    raw_stt_cfg = config.get("stt")
-    if isinstance(raw_stt_cfg, dict) and "provider" in raw_stt_cfg:
-        stt_explicit_configured = stt_provider not in {"", "local"}
-
     features = {
         "web": NousFeatureState(
             key="web",
@@ -688,33 +545,6 @@ def get_nous_subscription_features(
             toolset_enabled=video_tool_enabled,
             current_provider="FAL" if direct_fal_video else ("Nous Subscription" if video_managed else ""),
             explicit_configured=direct_fal_video,
-        ),
-        "tts": NousFeatureState(
-            key="tts",
-            label="OpenAI TTS",
-            included_by_default=True,
-            available=tts_available,
-            active=tts_active,
-            managed_by_nous=tts_managed,
-            direct_override=tts_active and not tts_managed,
-            toolset_enabled=tts_tool_enabled,
-            current_provider=_tts_label(tts_current_provider),
-            explicit_configured=tts_explicit_configured,
-        ),
-        "stt": NousFeatureState(
-            key="stt",
-            label="Speech-to-text",
-            included_by_default=True,
-            available=stt_available,
-            active=stt_active,
-            managed_by_nous=stt_managed,
-            direct_override=stt_active and not stt_managed,
-            # STT isn't toolset-gated (gateway middleware calls it
-            # unconditionally on inbound voice), so report True so the
-            # status display doesn't flag it as "tool disabled".
-            toolset_enabled=True,
-            current_provider=_stt_label(stt_current_provider),
-            explicit_configured=stt_explicit_configured,
         ),
         "browser": NousFeatureState(
             key="browser",
@@ -778,16 +608,6 @@ def apply_nous_managed_defaults(
         web_cfg = {}
         config["web"] = web_cfg
 
-    tts_cfg = config.get("tts")
-    if not isinstance(tts_cfg, dict):
-        tts_cfg = {}
-        config["tts"] = tts_cfg
-
-    stt_cfg = config.get("stt")
-    if not isinstance(stt_cfg, dict):
-        stt_cfg = {}
-        config["stt"] = stt_cfg
-
     browser_cfg = config.get("browser")
     if not isinstance(browser_cfg, dict):
         browser_cfg = {}
@@ -801,37 +621,6 @@ def apply_nous_managed_defaults(
     ):
         web_cfg["backend"] = "firecrawl"
         changed.add("web")
-
-    if "tts" in selected_toolsets and not features.tts.explicit_configured and not (
-        resolve_openai_audio_api_key()
-        or get_env_value("ELEVENLABS_API_KEY")
-    ):
-        tts_cfg["provider"] = "openai"
-        changed.add("tts")
-
-    # STT: same pattern as TTS. The DEFAULT_CONFIG seed is "local"
-    # (requires `pip install faster-whisper`); for Nous subscribers we
-    # flip it to "openai" so the managed audio gateway handles transcription
-    # via the same auth as TTS. Skipped when the user has explicitly
-    # configured STT, has direct credentials for a non-managed provider,
-    # has a working local backend (faster-whisper installed or a custom
-    # local command — strong intent signal that "local" was a choice, not
-    # just the DEFAULT_CONFIG seed), or isn't entitled to the managed
-    # "openai-audio" category (flipping would point at a gateway that
-    # refuses them, silently breaking voice transcription).
-    if (
-        not features.stt.explicit_configured
-        and not _local_stt_backend_available()
-        and not (
-            resolve_openai_audio_api_key()
-            or get_env_value("GROQ_API_KEY")
-            or get_env_value("MISTRAL_API_KEY")
-        )
-        and features.account_info is not None
-        and features.account_info.tool_gateway_entitled_for("openai-audio")
-    ):
-        stt_cfg["provider"] = "openai"
-        changed.add("stt")
 
     if "browser" in selected_toolsets and not features.browser.explicit_configured and not (
         get_env_value("BROWSER_USE_API_KEY")
@@ -874,8 +663,6 @@ _GATEWAY_TOOL_LABELS = {
     "web": "Web search & extract (Firecrawl)",
     "image_gen": "Image generation (FAL)",
     "video_gen": "Video generation (FAL)",
-    "tts": "Text-to-speech (OpenAI TTS)",
-    "stt": "Speech-to-text (OpenAI Whisper)",
     "browser": "Browser automation (Browser Use)",
 }
 
@@ -893,19 +680,6 @@ def _get_gateway_direct_credentials() -> Dict[str, bool]:
         ),
         "image_gen": fal_direct,
         "video_gen": fal_direct,
-        "tts": bool(
-            resolve_openai_audio_api_key()
-            or get_env_value("ELEVENLABS_API_KEY")
-        ),
-        # STT direct credentials. OpenAI Whisper shares the audio key
-        # with TTS via resolve_openai_audio_api_key() — counting it here
-        # too is intentional: if the user has an OpenAI audio key they
-        # don't need the gateway for either.
-        "stt": bool(
-            resolve_openai_audio_api_key()
-            or get_env_value("GROQ_API_KEY")
-            or get_env_value("MISTRAL_API_KEY")
-        ),
         "browser": bool(
             get_env_value("BROWSER_USE_API_KEY")
             or (get_env_value("BROWSERBASE_API_KEY") and get_env_value("BROWSERBASE_PROJECT_ID"))
@@ -917,12 +691,10 @@ _GATEWAY_DIRECT_LABELS = {
     "web": "Firecrawl/Exa/Parallel/Tavily key",
     "image_gen": "FAL key",
     "video_gen": "FAL key",
-    "tts": "OpenAI/ElevenLabs key",
-    "stt": "OpenAI/Groq/Mistral key",
     "browser": "Browser Use/Browserbase key",
 }
 
-_ALL_GATEWAY_KEYS = ("web", "image_gen", "video_gen", "tts", "stt", "browser")
+_ALL_GATEWAY_KEYS = ("web", "image_gen", "video_gen", "browser")
 
 
 def get_gateway_eligible_tools(
@@ -967,8 +739,6 @@ def get_gateway_eligible_tools(
         "web": _uses_gateway(config.get("web")),
         "image_gen": _uses_gateway(config.get("image_gen")),
         "video_gen": _uses_gateway(config.get("video_gen")),
-        "tts": _uses_gateway(config.get("tts")),
-        "stt": _uses_gateway(config.get("stt")),
         "browser": _uses_gateway(config.get("browser")),
     }
 
@@ -1010,16 +780,6 @@ def apply_gateway_defaults(
         web_cfg = {}
         config["web"] = web_cfg
 
-    tts_cfg = config.get("tts")
-    if not isinstance(tts_cfg, dict):
-        tts_cfg = {}
-        config["tts"] = tts_cfg
-
-    stt_cfg = config.get("stt")
-    if not isinstance(stt_cfg, dict):
-        stt_cfg = {}
-        config["stt"] = stt_cfg
-
     browser_cfg = config.get("browser")
     if not isinstance(browser_cfg, dict):
         browser_cfg = {}
@@ -1029,16 +789,6 @@ def apply_gateway_defaults(
         web_cfg["backend"] = "firecrawl"
         web_cfg["use_gateway"] = True
         changed.add("web")
-
-    if "tts" in tool_keys:
-        tts_cfg["provider"] = "openai"
-        tts_cfg["use_gateway"] = True
-        changed.add("tts")
-
-    if "stt" in tool_keys:
-        stt_cfg["provider"] = "openai"
-        stt_cfg["use_gateway"] = True
-        changed.add("stt")
 
     if "browser" in tool_keys:
         browser_cfg["cloud_provider"] = "browser-use"
@@ -1076,7 +826,7 @@ def prompt_enable_tool_gateway(
     "Pool enabled" is the trigger: a user with a live free tool pool (or paid
     access) is shown a per-tool checklist of the covered managed backends and
     picks which to route through the gateway. The free pool funds web/image/
-    tts/browser but not video, so the checklist only lists covered tools (the
+    browser but not video, so the checklist only lists covered tools (the
     coverage filter lives in get_gateway_eligible_tools).
 
     Returns the set of tools that were enabled, or empty set if the user
