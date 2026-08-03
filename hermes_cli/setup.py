@@ -6,7 +6,7 @@ Modular wizard with independently-runnable sections:
   2. Terminal Backend — where your agent runs commands
   3. Agent Settings — iterations, compression, session reset
   4. Messaging Platforms — connect Telegram, Discord, etc.
-  5. Tools — configure TTS, web search, image generation, etc.
+  5. Tools — configure web search, image generation, etc.
 
 Config files are stored in ~/.hermes/ for easy access.
 """
@@ -530,72 +530,6 @@ def _print_setup_summary(config: dict, hermes_home):
         if _video_backend:
             tool_status.append((f"Video Generation ({_video_backend})", True, None))
 
-    # TTS — show configured provider
-    tts_provider = cfg_get(config, "tts", "provider", default="edge")
-    if subscription_features.tts.managed_by_nous:
-        tool_status.append(("Text-to-Speech (OpenAI via Nous subscription)", True, None))
-    elif tts_provider == "elevenlabs" and get_env_value("ELEVENLABS_API_KEY"):
-        tool_status.append(("Text-to-Speech (ElevenLabs)", True, None))
-    elif tts_provider == "openai" and (
-        get_env_value("VOICE_TOOLS_OPENAI_KEY") or get_env_value("OPENAI_API_KEY")
-    ):
-        tool_status.append(("Text-to-Speech (OpenAI)", True, None))
-    elif tts_provider == "minimax" and get_env_value("MINIMAX_API_KEY"):
-        tool_status.append(("Text-to-Speech (MiniMax)", True, None))
-    elif tts_provider == "mistral" and get_env_value("MISTRAL_API_KEY"):
-        tool_status.append(("Text-to-Speech (Mistral Voxtral)", True, None))
-    elif tts_provider == "gemini" and (get_env_value("GEMINI_API_KEY") or get_env_value("GOOGLE_API_KEY")):
-        tool_status.append(("Text-to-Speech (Google Gemini)", True, None))
-    elif tts_provider == "neutts":
-        try:
-            neutts_ok = importlib.util.find_spec("neutts") is not None
-        except Exception:
-            neutts_ok = False
-        if neutts_ok:
-            tool_status.append(("Text-to-Speech (NeuTTS local)", True, None))
-        else:
-            tool_status.append(("Text-to-Speech (NeuTTS — not installed)", False, "run 'hermes setup tts'"))
-    elif tts_provider == "kittentts":
-        try:
-            kittentts_ok = importlib.util.find_spec("kittentts") is not None
-        except Exception:
-            kittentts_ok = False
-        if kittentts_ok:
-            tool_status.append(("Text-to-Speech (KittenTTS local)", True, None))
-        else:
-            tool_status.append(("Text-to-Speech (KittenTTS — not installed)", False, "run 'hermes setup tts'"))
-    else:
-        tool_status.append(("Text-to-Speech (Edge TTS)", True, None))
-
-    # STT — show configured provider
-    stt_provider = cfg_get(config, "stt", "provider", default="local") or "local"
-    _stt_feature = subscription_features.features.get("stt")
-    if _stt_feature is not None and _stt_feature.managed_by_nous:
-        tool_status.append(("Speech-to-Text (OpenAI via Nous subscription)", True, None))
-    elif stt_provider == "openai" and (
-        get_env_value("VOICE_TOOLS_OPENAI_KEY") or get_env_value("OPENAI_API_KEY")
-    ):
-        tool_status.append(("Speech-to-Text (OpenAI)", True, None))
-    elif stt_provider == "groq" and get_env_value("GROQ_API_KEY"):
-        tool_status.append(("Speech-to-Text (Groq Whisper)", True, None))
-    elif stt_provider == "elevenlabs" and get_env_value("ELEVENLABS_API_KEY"):
-        tool_status.append(("Speech-to-Text (ElevenLabs Scribe)", True, None))
-    elif stt_provider == "xai":
-        tool_status.append(("Speech-to-Text (xAI)", True, None))
-    elif stt_provider == "deepinfra" and get_env_value("DEEPINFRA_API_KEY"):
-        tool_status.append(("Speech-to-Text (DeepInfra)", True, None))
-    else:
-        try:
-            fw_ok = importlib.util.find_spec("faster_whisper") is not None
-        except Exception:
-            fw_ok = False
-        if fw_ok:
-            tool_status.append(("Speech-to-Text (Local Whisper)", True, None))
-        else:
-            tool_status.append(
-                ("Speech-to-Text (Local Whisper — not installed)", False, "run 'hermes tools' → Speech-to-Text")
-            )
-
     if subscription_features.modal.managed_by_nous:
         tool_status.append(("Modal Execution (Nous subscription)", True, None))
     elif cfg_get(config, "terminal", "backend") == "modal":
@@ -878,7 +812,7 @@ def setup_model_provider(config: dict, *, quick: bool = False):
     This ensures a single code path for all provider setup — any new
     provider added to ``hermes model`` is automatically available here.
 
-    When *quick* is True, skips credential rotation, vision, and TTS
+    When *quick* is True, skips credential rotation and vision
     configuration — used by the streamlined first-time quick setup.
     """
     from hermes_cli.config import load_config, save_config
@@ -911,11 +845,10 @@ def setup_model_provider(config: dict, *, quick: bool = False):
     config.clear()
     config.update(_refreshed)
 
-    # Credential rotation, vision-backend selection, and TTS provider are no
-    # longer prompted here. They have safe defaults (rotation off, vision
-    # auto-detected from the main provider, TTS = Edge) and are configurable
-    # on demand via `hermes auth add`, `hermes setup` vision, and
-    # `hermes setup tts`. This keeps both quick and full setup thin.
+    # Credential rotation and vision-backend selection are no longer
+    # prompted here. They have safe defaults (rotation off, vision
+    # auto-detected from the main provider) and are configurable on demand
+    # via `hermes auth add` and `hermes setup` vision.
 
 
     # Tool Gateway prompt is already shown by _model_flow_nous() above.
@@ -923,104 +856,15 @@ def setup_model_provider(config: dict, *, quick: bool = False):
 
 
 # =============================================================================
-# Section 1b: TTS Provider Configuration
-# =============================================================================
-
-
 def _check_espeak_ng() -> bool:
     """Check if espeak-ng is installed."""
     return shutil.which("espeak-ng") is not None or shutil.which("espeak") is not None
 
 
-def _install_neutts_deps() -> bool:
-    """Install NeuTTS dependencies with user approval. Returns True on success."""
-    import subprocess
-    import sys
-
-    # Check espeak-ng
-    if not _check_espeak_ng():
-        print()
-        print_warning("NeuTTS requires espeak-ng for phonemization.")
-        if sys.platform == "darwin":
-            print_info("Install with: brew install espeak-ng")
-        elif sys.platform == "win32":
-            print_info("Install with: choco install espeak-ng")
-        else:
-            print_info("Install with: sudo apt install espeak-ng")
-        print()
-        if prompt_yes_no("Install espeak-ng now?", True):
-            try:
-                if sys.platform == "darwin":
-                    subprocess.run(["brew", "install", "espeak-ng"], check=True)
-                elif sys.platform == "win32":
-                    subprocess.run(["choco", "install", "espeak-ng", "-y"], check=True)
-                else:
-                    subprocess.run(["sudo", "apt", "install", "-y", "espeak-ng"], check=True)
-                print_success("espeak-ng installed")
-            except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                print_warning(f"Could not install espeak-ng automatically: {e}")
-                print_info("Please install it manually and re-run setup.")
-                return False
-        else:
-            print_warning("espeak-ng is required for NeuTTS. Install it manually before using NeuTTS.")
-
-    # Install neutts Python package
-    print()
-    print_info("Installing neutts Python package...")
-    print_info("This will also download the TTS model (~300MB) on first use.")
-    print()
-
-    # Route through the canonical uv → pip → ensurepip ladder so pip-less
-    # venvs (Ubuntu 25.10 `python -m venv`, `uv venv`) work out of the box.
-    from hermes_cli.tools_config import _pip_install
-
-    try:
-        result = _pip_install(["-U", "neutts[all]", "--quiet"], timeout=300)
-    except Exception as e:
-        print_error(f"Failed to install neutts: {e}")
-        print_info("Try manually: uv pip install -U 'neutts[all]'")
-        return False
-    if result.returncode == 0:
-        print_success("neutts installed successfully")
-        return True
-    err = (result.stderr or "").strip()
-    print_error(f"Failed to install neutts: {err[:300] if err else 'install failed'}")
-    print_info("Try manually: uv pip install -U 'neutts[all]'")
-    return False
-
-
-def _install_kittentts_deps() -> bool:
-    """Install KittenTTS dependencies with user approval. Returns True on success."""
-
-    wheel_url = (
-        "https://github.com/KittenML/KittenTTS/releases/download/"
-        "0.8.1/kittentts-0.8.1-py3-none-any.whl"
-    )
-    print()
-    print_info("Installing kittentts Python package (~25-80MB model downloaded on first use)...")
-    print()
-
-    from hermes_cli.tools_config import _pip_install
-
-    try:
-        result = _pip_install(["-U", wheel_url, "soundfile", "--quiet"], timeout=300)
-    except Exception as e:
-        print_error(f"Failed to install kittentts: {e}")
-        print_info(f"Try manually: uv pip install -U '{wheel_url}' soundfile")
-        return False
-    if result.returncode == 0:
-        print_success("kittentts installed successfully")
-        return True
-    err = (result.stderr or "").strip()
-    print_error(f"Failed to install kittentts: {err[:300] if err else 'install failed'}")
-    print_info(f"Try manually: uv pip install -U '{wheel_url}' soundfile")
-    return False
-
-
 def _xai_oauth_logged_in_for_setup() -> bool:
     """True iff xAI Grok OAuth credentials are already stored locally.
 
-    Lets TTS / STT setup skip the API-key prompt for users who logged in
+    Lets tool setup skip the API-key prompt for users who logged in
     through ``hermes model`` -> xAI Grok OAuth (SuperGrok / Premium+).
     """
     try:
@@ -1035,11 +879,11 @@ def _run_xai_oauth_login_from_setup() -> bool:
     """Run the xAI Grok OAuth device-code login from inside the setup wizard.
 
     Saves OAuth tokens only. Does **not** switch the active inference
-    provider or rewrite ``model.provider`` — callers (TTS setup, tools
-    config) only need credentials for side tools.
+    provider or rewrite ``model.provider`` — callers (tools config) only
+    need credentials for side tools.
 
     Returns True on success, False on any failure (the caller falls back
-    to whatever the user picked next, e.g. Edge TTS).
+    to whatever the user picked next).
     """
     try:
         from hermes_cli.auth import (
@@ -1072,247 +916,6 @@ def _run_xai_oauth_login_from_setup() -> bool:
     except Exception as exc:
         print_warning(f"xAI Grok OAuth login failed: {exc}")
         return False
-
-
-def _setup_tts_provider(config: dict):
-    """Interactive TTS provider selection with install flow for NeuTTS."""
-    tts_config = config.get("tts", {})
-    current_provider = tts_config.get("provider", "edge")
-    subscription_features = get_nous_subscription_features(config)
-
-    provider_labels = {
-        "edge": "Edge TTS",
-        "elevenlabs": "ElevenLabs",
-        "openai": "OpenAI TTS",
-        "xai": "xAI TTS",
-        "minimax": "MiniMax TTS",
-        "mistral": "Mistral Voxtral TTS",
-        "gemini": "Google Gemini TTS",
-        "neutts": "NeuTTS",
-        "kittentts": "KittenTTS",
-    }
-    current_label = provider_labels.get(current_provider, current_provider)
-
-    print()
-    print_header("Text-to-Speech Provider (optional)")
-    print_info(f"Current: {current_label}")
-    print()
-
-    choices = []
-    providers = []
-    if managed_nous_tools_enabled() and subscription_features.nous_auth_present:
-        choices.append("Nous Subscription (managed OpenAI TTS, billed to your subscription)")
-        providers.append("nous-openai")
-    choices.extend(
-        [
-            "Edge TTS (free, cloud-based, no setup needed)",
-            "ElevenLabs (premium quality, needs API key)",
-            "OpenAI TTS (good quality, needs API key)",
-            "xAI TTS (Grok voices — OAuth login or API key)",
-            "MiniMax TTS (high quality with voice cloning, needs API key)",
-            "Mistral Voxtral TTS (multilingual, native Opus, needs API key)",
-            "Google Gemini TTS (30 prebuilt voices, prompt-controllable, needs API key)",
-            "NeuTTS (local on-device, free, ~300MB model download)",
-            "KittenTTS (local on-device, free, lightweight ~25-80MB ONNX)",
-        ]
-    )
-    providers.extend(["edge", "elevenlabs", "openai", "xai", "minimax", "mistral", "gemini", "neutts", "kittentts"])
-    choices.append(f"Keep current ({current_label})")
-    keep_current_idx = len(choices) - 1
-    idx = prompt_choice("Select TTS provider:", choices, keep_current_idx)
-
-    if idx == keep_current_idx:
-        return
-
-    selected = providers[idx]
-    selected_via_nous = selected == "nous-openai"
-    if selected == "nous-openai":
-        selected = "openai"
-        print_info("OpenAI TTS will use the managed Nous gateway and bill to your subscription.")
-        if get_env_value("VOICE_TOOLS_OPENAI_KEY") or get_env_value("OPENAI_API_KEY"):
-            print_warning(
-                "Direct OpenAI credentials are still configured and may take precedence until removed from ~/.hermes/.env."
-            )
-
-    if selected == "neutts":
-        # Check if already installed
-        try:
-            already_installed = importlib.util.find_spec("neutts") is not None
-        except Exception:
-            already_installed = False
-
-        if already_installed:
-            print_success("NeuTTS is already installed")
-        else:
-            print()
-            print_info("NeuTTS requires:")
-            print_info("  • Python package: neutts (~50MB install + ~300MB model on first use)")
-            print_info("  • System package: espeak-ng (phonemizer)")
-            print()
-            if prompt_yes_no("Install NeuTTS dependencies now?", True):
-                if not _install_neutts_deps():
-                    print_warning("NeuTTS installation incomplete. Falling back to Edge TTS.")
-                    selected = "edge"
-            else:
-                print_info("Skipping install. Set tts.provider to 'neutts' after installing manually.")
-                selected = "edge"
-
-    elif selected == "elevenlabs":
-        existing = get_env_value("ELEVENLABS_API_KEY")
-        if not existing:
-            print()
-            api_key = prompt("ElevenLabs API key", password=True)
-            if api_key:
-                save_env_value("ELEVENLABS_API_KEY", api_key)
-                print_success("ElevenLabs API key saved")
-            else:
-                print_warning("No API key provided. Falling back to Edge TTS.")
-                selected = "edge"
-
-    elif selected == "openai" and not selected_via_nous:
-        existing = get_env_value("VOICE_TOOLS_OPENAI_KEY") or get_env_value("OPENAI_API_KEY")
-        if not existing:
-            print()
-            api_key = prompt("OpenAI API key for TTS", password=True)
-            if api_key:
-                save_env_value("VOICE_TOOLS_OPENAI_KEY", api_key)
-                print_success("OpenAI TTS API key saved")
-            else:
-                print_warning("No API key provided. Falling back to Edge TTS.")
-                selected = "edge"
-
-    elif selected == "xai":
-        # Resolution order: existing OAuth tokens (free for SuperGrok subscribers
-        # via the Hermes auth store) > existing XAI_API_KEY > prompt the user.
-        # When neither is configured, offer both options instead of forcing the
-        # API-key path — xAI TTS works fine with OAuth bearer tokens too.
-        oauth_logged_in = _xai_oauth_logged_in_for_setup()
-        existing_api_key = get_env_value("XAI_API_KEY")
-
-        if oauth_logged_in:
-            print_success(
-                "xAI TTS will use your xAI Grok OAuth (SuperGrok / Premium+) "
-                "credentials"
-            )
-        elif existing_api_key:
-            print_success("xAI TTS will use your existing XAI_API_KEY")
-        else:
-            print()
-            choice_idx = prompt_choice(
-                "How do you want xAI TTS to authenticate?",
-                choices=[
-                    "Sign in with xAI Grok OAuth (SuperGrok / Premium+) — browser login",
-                    "Paste an xAI API key (console.x.ai)",
-                    "Skip → fallback to Edge TTS",
-                ],
-                default=0,
-            )
-            if choice_idx == 0:
-                if _run_xai_oauth_login_from_setup():
-                    print_success(
-                        "Logged in — xAI TTS will use these OAuth credentials"
-                    )
-                else:
-                    print_warning(
-                        "xAI Grok OAuth login did not complete. "
-                        "Falling back to Edge TTS."
-                    )
-                    selected = "edge"
-            elif choice_idx == 1:
-                api_key = prompt("xAI API key for TTS", password=True)
-                if api_key:
-                    save_env_value("XAI_API_KEY", api_key)
-                    print_success("xAI TTS API key saved")
-                else:
-                    from hermes_constants import display_hermes_home as _dhh
-                    print_warning(
-                        "No xAI API key provided for TTS. Configure XAI_API_KEY "
-                        f"via hermes setup model or {_dhh()}/.env to use xAI TTS. "
-                        "Falling back to Edge TTS."
-                    )
-                    selected = "edge"
-            else:
-                print_warning("xAI TTS skipped. Falling back to Edge TTS.")
-                selected = "edge"
-
-        if selected == "xai":
-            print()
-            voice_id = prompt("xAI voice_id (Enter for 'eve', or paste a custom voice ID)")
-            if voice_id and voice_id.strip():
-                config.setdefault("tts", {}).setdefault("xai", {})["voice_id"] = voice_id.strip()
-                print_success(f"xAI voice_id set to: {voice_id.strip()}")
-
-
-    elif selected == "minimax":
-        existing = get_env_value("MINIMAX_API_KEY")
-        if not existing:
-            print()
-            api_key = prompt("MiniMax API key for TTS", password=True)
-            if api_key:
-                save_env_value("MINIMAX_API_KEY", api_key)
-                print_success("MiniMax TTS API key saved")
-            else:
-                print_warning("No API key provided. Falling back to Edge TTS.")
-                selected = "edge"
-
-    elif selected == "mistral":
-        existing = get_env_value("MISTRAL_API_KEY")
-        if not existing:
-            print()
-            api_key = prompt("Mistral API key for TTS", password=True)
-            if api_key:
-                save_env_value("MISTRAL_API_KEY", api_key)
-                print_success("Mistral TTS API key saved")
-            else:
-                print_warning("No API key provided. Falling back to Edge TTS.")
-                selected = "edge"
-
-    elif selected == "gemini":
-        existing = get_env_value("GEMINI_API_KEY") or get_env_value("GOOGLE_API_KEY")
-        if not existing:
-            print()
-            print_info("Get a free API key at https://aistudio.google.com/app/apikey")
-            api_key = prompt("Gemini API key for TTS", password=True)
-            if api_key:
-                save_env_value("GEMINI_API_KEY", api_key)
-                print_success("Gemini TTS API key saved")
-            else:
-                print_warning("No API key provided. Falling back to Edge TTS.")
-                selected = "edge"
-
-    elif selected == "kittentts":
-        # Check if already installed
-        try:
-            already_installed = importlib.util.find_spec("kittentts") is not None
-        except Exception:
-            already_installed = False
-
-        if already_installed:
-            print_success("KittenTTS is already installed")
-        else:
-            print()
-            print_info("KittenTTS is lightweight (~25-80MB, CPU-only, no API key required).")
-            print_info("Voices: Jasper, Bella, Luna, Bruno, Rosie, Hugo, Kiki, Leo")
-            print()
-            if prompt_yes_no("Install KittenTTS now?", True):
-                if not _install_kittentts_deps():
-                    print_warning("KittenTTS installation incomplete. Falling back to Edge TTS.")
-                    selected = "edge"
-            else:
-                print_info("Skipping install. Set tts.provider to 'kittentts' after installing manually.")
-                selected = "edge"
-
-    # Save the selection
-    if "tts" not in config:
-        config["tts"] = {}
-    config["tts"]["provider"] = selected
-    save_config(config)
-    print_success(f"TTS provider set to: {provider_labels.get(selected, selected)}")
-
-
-def setup_tts(config: dict):
-    """Standalone TTS setup (for 'hermes setup tts')."""
-    _setup_tts_provider(config)
 
 
 # =============================================================================
@@ -2552,8 +2155,6 @@ def _get_section_config_summary(config: dict, section_key: str) -> Optional[str]
 
     elif section_key == "tools":
         tools = []
-        if get_env_value("ELEVENLABS_API_KEY"):
-            tools.append("TTS/ElevenLabs")
         if get_env_value("BROWSERBASE_API_KEY"):
             tools.append("Browser")
         if get_env_value("FIRECRAWL_API_KEY"):
@@ -2841,7 +2442,6 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
 
 SETUP_SECTIONS = [
     ("model", "Model & Provider", setup_model_provider),
-    ("tts", "Text-to-Speech", setup_tts),
     ("terminal", "Terminal Backend", setup_terminal_backend),
     ("gateway", "Messaging Platforms (Gateway)", setup_gateway),
     ("tools", "Tools", setup_tools),
@@ -2856,7 +2456,7 @@ def _run_portal_one_shot(config: dict) -> None:
     Wired into ``hermes setup --portal`` and ``hermes portal``. This is the
     Nous-Portal slice of the first-time quick setup, collapsed into a single
     shareable command so a brand-new user goes from zero to a fully working
-    Hermes session — model selected, provider set, and web/image/tts/browser
+    Hermes session — model selected, provider set, and web/image/browser
     tools routed via their Portal sub — without being told to run
     ``hermes setup`` and hunt for the quick-setup option.
 
@@ -2885,7 +2485,7 @@ def _run_portal_one_shot(config: dict) -> None:
     )
     print()
     print_info("  One subscription, 300+ models, plus the Tool Gateway:")
-    print_info("    web search, image generation, TTS, browser automation")
+    print_info("    web search, image generation, browser automation")
     print_info("    — all routed through your Nous Portal sub.")
     print()
     print_info("  Sign up: https://portal.nousresearch.com/manage-subscription")
@@ -2940,7 +2540,6 @@ def run_setup_wizard(args):
     Supports full, quick, and section-specific setup:
       hermes setup           — full or quick (auto-detected)
       hermes setup model     — just model/provider
-      hermes setup tts       — just text-to-speech
       hermes setup terminal  — just terminal backend
       hermes setup gateway   — just messaging platforms
       hermes setup tools     — just tool configuration
@@ -3188,7 +2787,7 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
     print()
     print_header("Nous Portal")
     print_info("One subscription, 300+ models, plus the Tool Gateway:")
-    print_info("  web search, image generation, TTS, browser automation.")
+    print_info("  web search, image generation, browser automation.")
     print_info("Sign up: https://portal.nousresearch.com/manage-subscription")
     print()
     try:
