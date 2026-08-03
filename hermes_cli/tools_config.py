@@ -1617,78 +1617,6 @@ def _run_post_setup(post_setup_key: str):
     elif post_setup_key == "cua_driver":
         install_cua_driver(upgrade=False)
 
-    elif post_setup_key == "faster_whisper":
-        import subprocess
-        try:
-            __import__("faster_whisper")
-            _print_success("    faster-whisper is already installed")
-            return
-        except ImportError:
-            pass
-        _print_info("    Installing faster-whisper (model ~150MB downloads on first use)...")
-        try:
-            result = _pip_install(["-U", "faster-whisper", "--quiet"], timeout=300)
-            if result.returncode == 0:
-                _print_success("    faster-whisper installed")
-                _print_info("    Model sizes: tiny, base (default), small, medium, large-v3")
-                _print_info("    Change via stt.local.model in ~/.hermes/config.yaml")
-            else:
-                _print_warning("    faster-whisper install failed:")
-                _print_info(f"      {(result.stderr or '').strip()[:300]}")
-                _print_info("    Run manually: uv pip install -U faster-whisper")
-        except subprocess.TimeoutExpired:
-            _print_warning("    faster-whisper install timed out (>5min)")
-            _print_info("    Run manually: uv pip install -U faster-whisper")
-
-    elif post_setup_key == "kittentts":
-        try:
-            __import__("kittentts")
-            _print_success("    kittentts is already installed")
-            return
-        except ImportError:
-            pass
-        _print_info("    Installing kittentts (~25-80MB model, CPU-only)...")
-        wheel_url = (
-            "https://github.com/KittenML/KittenTTS/releases/download/"
-            "0.8.1/kittentts-0.8.1-py3-none-any.whl"
-        )
-        try:
-            result = _pip_install(["-U", wheel_url, "soundfile", "--quiet"], timeout=300)
-            if result.returncode == 0:
-                _print_success("    kittentts installed")
-                _print_info("    Voices: Jasper, Bella, Luna, Bruno, Rosie, Hugo, Kiki, Leo")
-                _print_info("    Models: KittenML/kitten-tts-nano-0.8-int8 (25MB), micro (41MB), mini (80MB)")
-            else:
-                _print_warning("    kittentts install failed:")
-                _print_info(f"      {(result.stderr or '').strip()[:300]}")
-                _print_info(f"    Run manually: uv pip install -U '{wheel_url}' soundfile")
-        except subprocess.TimeoutExpired:
-            _print_warning("    kittentts install timed out (>5min)")
-            _print_info(f"    Run manually: uv pip install -U '{wheel_url}' soundfile")
-
-    elif post_setup_key == "piper":
-        try:
-            __import__("piper")
-            _print_success("    piper-tts is already installed")
-        except ImportError:
-            _print_info("    Installing piper-tts (~14MB wheel, voices downloaded on first use)...")
-            try:
-                result = _pip_install(["-U", "piper-tts", "--quiet"], timeout=300)
-                if result.returncode == 0:
-                    _print_success("    piper-tts installed")
-                else:
-                    _print_warning("    piper-tts install failed:")
-                    _print_info(f"      {(result.stderr or '').strip()[:300]}")
-                    _print_info("    Run manually: uv pip install -U piper-tts")
-                    return
-            except subprocess.TimeoutExpired:
-                _print_warning("    piper-tts install timed out (>5min)")
-                _print_info("    Run manually: uv pip install -U piper-tts")
-                return
-        _print_info("    Default voice: en_US-lessac-medium (downloaded on first TTS call)")
-        _print_info("    Full voice list: https://github.com/OHF-Voice/piper1-gpl/blob/main/docs/VOICES.md")
-        _print_info("    Switch voices by setting tts.piper.voice in ~/.hermes/config.yaml")
-
     elif post_setup_key == "ddgs":
         try:
             __import__("ddgs")
@@ -2464,7 +2392,7 @@ def _toolset_has_keys(
         except Exception:
             return False
 
-    if ts_key in {"web", "image_gen", "video_gen", "tts", "stt", "browser"}:
+    if ts_key in {"web", "image_gen", "video_gen", "browser"}:
         features = get_nous_subscription_features(config, force_fresh=force_fresh)
         feature = features.features.get(ts_key)
         if feature and (feature.available or feature.managed_by_nous):
@@ -2847,62 +2775,6 @@ def _plugin_browser_providers() -> list[dict]:
     return rows
 
 
-def _plugin_tts_providers() -> list[dict]:
-    """Build picker-row dicts from plugin-registered TTS providers.
-
-    Issue #30398 — the ``register_tts_provider()`` plugin hook
-    coexists alongside the 10 built-in TTS providers
-    (``edge``/``openai``/``elevenlabs``/…) and the
-    ``tts.providers.<name>: type: command`` registry from PR #17843.
-    Built-in rows stay hardcoded in ``TOOL_CATEGORIES["tts"]``; this
-    function only injects PLUGIN-registered providers.
-
-    Defensive: plugins whose name collides with a built-in TTS provider
-    are filtered out — even though the registry already rejects them
-    at registration time, a future code path that registers directly
-    via :func:`agent.tts_registry.register_provider` could slip
-    through. Filtering here keeps the picker invariant.
-    """
-    try:
-        from agent.tts_registry import _BUILTIN_NAMES, list_providers
-        from hermes_cli.plugins import _ensure_plugins_discovered
-
-        _ensure_plugins_discovered()
-        providers = list_providers()
-    except Exception:
-        return []
-
-    rows: list[dict] = []
-    for provider in providers:
-        name = getattr(provider, "name", None)
-        if not name:
-            continue
-        # Defensive: reject built-in shadowing at the picker layer too.
-        if name.lower().strip() in _BUILTIN_NAMES:
-            continue
-        try:
-            schema = provider.get_setup_schema()
-        except Exception:
-            continue
-        if not isinstance(schema, dict):
-            continue
-        row = {
-            "name": schema.get("name", provider.display_name),
-            "badge": schema.get("badge", ""),
-            "tag": schema.get("tag", ""),
-            "env_vars": schema.get("env_vars", []),
-            # Selecting this row writes ``tts.provider: <name>`` — the
-            # same write-path used by hardcoded rows. The plugin
-            # dispatcher picks it up automatically from there.
-            "tts_provider": name,
-            "tts_plugin_name": name,
-        }
-        if schema.get("post_setup"):
-            row["post_setup"] = schema["post_setup"]
-        rows.append(row)
-    return rows
-
-
 def _visible_providers(
     cat: dict,
     config: dict,
@@ -2978,12 +2850,6 @@ def _visible_providers(
     if cat.get("name") == "Browser Automation":
         visible.extend(_plugin_browser_providers())
 
-    # Inject plugin-registered TTS backends (issue #30398). Plugin rows
-    # render BELOW the 10 hardcoded built-in rows. Built-in shadowing
-    # is filtered out by ``_plugin_tts_providers`` defensively.
-    if cat.get("name") == "Text-to-Speech":
-        visible.extend(_plugin_tts_providers())
-
     return visible
 
 
@@ -3015,8 +2881,8 @@ _POST_SETUP_INSTALLED: dict = {
     # because the gate sees "no env vars to ask about" and skips the
     # provider-setup flow that would have run the post_setup hook).
     #
-    # Only entries here are gated; other post_setup hooks (kittentts,
-    # piper, agent_browser, etc.) keep their existing behaviour. Add an
+    # Only entries here are gated; other post_setup hooks (agent_browser,
+    # etc.) keep their existing behaviour. Add an
     # entry when (a) the post_setup is the ONLY install side-effect for
     # a no-key provider, and (b) an installed-state check is cheap and
     # doesn't trigger a heavy import.
