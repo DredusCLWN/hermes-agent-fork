@@ -1,0 +1,54 @@
+# Stack: Context7 + Unity MCP + Skills
+Язык: **русский**, если пользователь не попросил иначе.
+**Важно:** критичные правила в `.windsurfrules` в корне проекта — загружаются всегда. Этот файл — detail для memory retrieval. При конфликте — `.windsurfrules` приоритетнее.
+
+## Backup (если нет `.windsurfrules`)
+Язык: русский. Caveman: телеграфный стиль, без water-text. Footer (обязателен): `Context7: (lib: …)|нет. Unity MCP: (obj: …)|нет. Obsidian: (obj: …)|нет. Skills: (skill: …)|нет.` `*.unity`/`*.prefab` — через Unity MCP. Проектная память — через Obsidian MCP (filesystem server, `.ai-memory/*.md`). Не более 1 MCP одновременно. Skills — Windsurf native, `~/.codeium/windsurf/skills/`. При первой работе — создать `.windsurfrules` из этого файла.
+
+## Проект
+- `PROJECT_ROOT` = корень workspace.
+- Пути с пробелами — в двойных кавычках.
+
+## Цепочки
+- Full: `AGENTS.md`/`PROJECT_STATE.md`/`TODO.md`/`docs/context7-libraries.md` → Unity MCP (если нужна сцена) → Context7 → web fallback → `@файл` → правки.
+- Lite (триггеры): `делай сразу`, `@файл`, `только код`/`без <слой>`, `без mcp`.
+
+## Unity MCP
+`*.unity`/`*.prefab` — строго через MCP (`unityMCP` stdio / `http://127.0.0.1:8080/mcp` когда Unity Editor запущен). Исключение: MCP недоступен → правь только `.cs`. Не трогать `PluginYourGames/` без просьбы. Build/массовое удаление — high-risk.
+
+## Триггеры + автоматизация
+После 5+ tool calls — предложи `обнови контекст` перед футером.
+`только код`→выкл всё MCP | `без <слой>`→выкл слой | `делай сразу`→без уточений
+
+## CLI + внешние слои
+- **One MCP at a time.** MCP hung — abort, don't wait.
+- Context7 MCP: `context7` (`resolve-library-id`→`query-docs`, ≤3).
+- Obsidian MCP: `obsidian` — `.ai-memory/*.md`.
+- Не индексировать: `node_modules/`,`Library/`,`Temp/`,`Logs/`,`dist/`.
+
+## Token Killers
+Web: `read_url_content` → сначала `r.jina.ai/<URL>` (-60-80%). `search_web` — только заголовки.
+
+## Skills + Сессии
+После 20+ сообщений — предложи новую сессию.
+
+## Solo-indie / универсальность
+- Solo-dev: KISS, no over-engineering. Не добавлять командные ритуалы, лишнюю доку или абстракции без запроса.
+- Универсальность: определять стек по файлам проекта. Unity (`*.unity`, `*.prefab`, `ProjectSettings`) → Unity MCP. Web (`package.json`, `next.config`, `vite.config`, `index.html`, `.tsx`/`.jsx`) → Context7 + grep/read. Прочее → grep/read + Context7.
+- Свежесть док: Context7 → `search_web`/`r.jina.ai` → предложить `docs/<topic>.md` / `.ai-memory/<topic>.md` / `PROJECT_STATE.md`.
+- Если по ходу задачи появляется новый инструмент/слой и нет документации — предложить добавить.
+
+## Memory automation
+- **Автоматические обновления `.ai-memory` после каждого workflow:**
+  - `/bug-fix` → reusable root cause → `.ai-memory/FAQ.md`; архитектурное изменение → `.ai-memory/DECISIONS.md`.
+  - `/new-feature` → `.ai-memory/DECISIONS.md` (ключевое решение) + `.ai-memory/<topic>.md` (новая система) + `PROJECT_STATE.md`.
+  - `/optimize` → `.ai-memory/PERFORMANCE.md` (baseline, hotspot, result) + `.ai-memory/DECISIONS.md` если архитектура поменялась.
+  - `/review` → повторяющийся риск/баг → `.ai-memory/FAQ.md` или `.ai-memory/DECISIONS.md`.
+  - `/beautify-web` → `.ai-memory/DECISIONS.md` (выбор стиля/токенов) + `.ai-memory/<topic>.md` (редизайн) + `PROJECT_STATE.md`.
+- **Ручные триггеры:**
+  - `загрузи память` / `load memory` — в начале работы с проектом: найти корень проекта (по `AGENTS.md`/`PROJECT_STATE.md`/`TODO.md` или `.windsurfrules`), создать `.ai-memory` если нет, создать/прочитать `.ai-memory/FAQ.md`, `.ai-memory/DECISIONS.md`, `.ai-memory/PERFORMANCE.md`, `.ai-memory/PROJECT.md`, `.ai-memory/Graph.md` (ссылки на все заметки) и загрузить их в контекст.
+  - `обнови память` / `update memory` — после текущей задачи сканировать diff/`PROJECT_STATE.md` и обновить `.ai-memory/*.md`.
+- **Wikilinks:** в `.ai-memory/*.md` использовать `[[Note Name]]` для связей в Obsidian Graph View.
+- **Vault path:** `.ai-memory` в корне проекта — хранилище проектной памяти агента. Агент читает/пишет `.ai-memory/*.md` напрямую через файловую систему. Чтобы Obsidian открывал vault с именем проекта, можно создать directory junction `<ProjectName>` в `$env:USERPROFILE\WindsurfVaults\` (`C:\Users\<user>\WindsurfVaults\<ProjectName>`), указывающий на `.ai-memory`. Конкретный путь берётся из `.windsurfrules` / `AGENTS.md`.
+
+## Synergy

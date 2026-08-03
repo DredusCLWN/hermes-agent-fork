@@ -2238,7 +2238,6 @@ from gateway.platforms.base import (
     MessageType,
     _prefix_within_utf16_limit,
     _reply_anchor_for_event,
-    build_auto_tts_output_path,
     merge_pending_message_event,
     utf16_len,
 )
@@ -17850,7 +17849,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # send_multiple_images (Telegram sendPhoto recompresses to ~1280px).
             force_document_attachments = "[[as_document]]" in response
 
-            from gateway.platforms.base import BasePlatformAdapter, should_send_media_as_audio
+            from gateway.platforms.base import BasePlatformAdapter
 
             media_files, cleaned = adapter.extract_media(response)
             media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files)
@@ -17880,14 +17879,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # send_document below — preserving original bytes.
             image_paths: list = []
             non_image_media: list = []
-            for media_path, is_voice in media_files:
+            for media_path, _ in media_files:
                 ext = Path(media_path).suffix.lower()
                 if (ext in _IMAGE_EXTS
-                        and not is_voice
                         and not force_document_attachments):
                     image_paths.append(media_path)
                 else:
-                    non_image_media.append((media_path, is_voice))
+                    non_image_media.append((media_path, _))
 
             if image_paths:
                 try:
@@ -17900,16 +17898,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 except Exception as e:
                     logger.warning("[%s] Post-stream image batch delivery failed: %s", adapter.name, e)
 
-            for media_path, is_voice in non_image_media:
+            for media_path, _ in non_image_media:
                 try:
                     ext = Path(media_path).suffix.lower()
-                    if should_send_media_as_audio(event.source.platform, ext, is_voice=is_voice):
-                        await adapter.send_voice(
-                            chat_id=event.source.chat_id,
-                            audio_path=media_path,
-                            metadata=_thread_meta,
-                        )
-                    elif ext in _VIDEO_EXTS:
+                    if ext in _VIDEO_EXTS:
                         await adapter.send_video(
                             chat_id=event.source.chat_id,
                             video_path=media_path,
@@ -18106,24 +18098,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     except Exception:
                         pass
 
-                # Send media files, routing each by type so a TTS clip
-                # arrives as a voice bubble / a clip as a video rather than
-                # a generic document. Mirrors the streaming + kanban paths.
-                from gateway.platforms.base import (
-                    should_send_media_as_audio as _should_send_media_as_audio,
-                )
+                # Send media files, routing each by type so a clip is a video
+                # rather than a generic document. Mirrors the streaming + kanban paths.
                 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
                 _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp"}
-                for media_path, _is_voice in (media_files or []):
+                for media_path, _ in (media_files or []):
                     _ext = os.path.splitext(media_path)[1].lower()
                     try:
-                        if _should_send_media_as_audio(source.platform, _ext, _is_voice):
-                            await adapter.send_voice(
-                                chat_id=source.chat_id,
-                                audio_path=media_path,
-                                metadata=_thread_metadata,
-                            )
-                        elif _ext in _VIDEO_EXTS:
+                        if _ext in _VIDEO_EXTS:
                             await adapter.send_video(
                                 chat_id=source.chat_id,
                                 video_path=media_path,
