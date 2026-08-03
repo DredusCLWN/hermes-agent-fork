@@ -87,7 +87,6 @@ const MATH_BLOCK_CLOSE_DOLLAR_RE = /^(.*?)\$\$\s*$/
 const MATH_BLOCK_CLOSE_BRACKET_RE = /^(.*?)\\\]\s*$/
 
 export const MEDIA_LINE_RE = /^\s*[`"']?MEDIA:\s*(\S+?)[`"']?\s*$/
-export const AUDIO_DIRECTIVE_RE = /^\s*\[\[audio_as_voice\]\]\s*$/
 
 // Inline markdown tokens, in priority order. The outer regex picks the
 // leftmost match at each position, preferring earlier alternatives on tie —
@@ -744,12 +743,6 @@ function MdImpl({ cols, compact, t, text }: MdProps) {
           gap()
         }
 
-        i++
-
-        continue
-      }
-
-      if (AUDIO_DIRECTIVE_RE.test(line)) {
         i++
 
         continue

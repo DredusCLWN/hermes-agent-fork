@@ -7,12 +7,6 @@ import { optimisticAttachmentRef } from '@/lib/chat-runtime'
 import { sanitizeComposerInput } from '@/lib/composer-input-sanitize'
 import { setMutableRef } from '@/lib/mutable-ref'
 import {
-  isVoicePlaybackActive,
-  markVoicePlaybackInterrupted,
-  stopVoicePlayback,
-  takeVoicePlaybackInterrupted
-} from '@/lib/voice-playback'
-import {
   $composerAttachments,
   clearComposerAttachments,
   type ComposerAttachment,
@@ -168,16 +162,6 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
       ) {
         return false
       }
-
-      // Typing barge-in: a new send silences any in-flight spoken reply.
-      if (isVoicePlaybackActive()) {
-        markVoicePlaybackInterrupted()
-        stopVoicePlayback()
-      }
-
-      // Barged mid-speech (here or via the voice loop's VAD)? Flag the submit
-      // so the backend notes the interruption to the model.
-      const interrupted = takeVoicePlaybackInterrupted()
 
       // Queue drains carry their source session explicitly. A background drain
       // must never inherit the currently selected session after the user moves
@@ -605,7 +589,6 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
         const submitParams = (targetId: string) => ({
           session_id: targetId,
           text,
-          ...(interrupted && { interrupted }),
           // A queue drain is a "run after" message, never a live-turn
           // correction. The flag tells the gateway's busy path to hold it for
           // the next turn untouched — without it, losing the settle race

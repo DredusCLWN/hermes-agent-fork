@@ -622,7 +622,7 @@ class SimplexAdapter(BasePlatformAdapter):
         msg_type = MessageType.TEXT
         if media_types:
             if any(mt.startswith("audio/") for mt in media_types):
-                msg_type = MessageType.VOICE
+                msg_type = MessageType.AUDIO
             elif any(mt.startswith("image/") for mt in media_types):
                 msg_type = MessageType.PHOTO
             else:
@@ -1035,48 +1035,6 @@ class SimplexAdapter(BasePlatformAdapter):
             return SendResult(success=True)
         return SendResult(success=False, error="Failed to send document")
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        duration: int = 0,
-        **kwargs,
-    ) -> SendResult:
-        """Send an audio file as a SimpleX voice note (plays inline).
-
-        SimpleX distinguishes a generic file attachment (``type: "file"``)
-        from an inline voice note (``type: "voice"``). ``/f`` would deliver
-        a downloadable file; the structured ``/_send`` form with
-        ``msgContent.type == "voice"`` produces the voice-note player.
-        """
-        if not Path(audio_path).exists():
-            return SendResult(success=False, error="Voice file not found")
-
-        composed = json.dumps(
-            [
-                {
-                    "msgContent": {
-                        "type": "voice",
-                        "text": caption or "",
-                        "duration": duration,
-                    },
-                    "fileSource": {"filePath": audio_path},
-                }
-            ]
-        )
-
-        if chat_id.startswith("group:"):
-            group_id = chat_id[6:]
-            command = f"/_send #{group_id} json {composed}"
-        else:
-            command = f"/_send @{chat_id} json {composed}"
-
-        result = await self._send_command(command)
-        if result is not None:
-            return SendResult(success=True)
-        return SendResult(success=False, error="Failed to send voice message")
 
     async def send_typing(self, chat_id: str, metadata=None) -> None:
         """SimpleX has no typing-indicator API — no-op."""

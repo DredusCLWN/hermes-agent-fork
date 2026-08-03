@@ -1469,35 +1469,6 @@ class RelayAdapter(BasePlatformAdapter):
             **kwargs,
         )
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ) -> SendResult:
-        """Send a local audio file as a native voice message (upload → send_media)."""
-        result = await self._send_media(
-            chat_id,
-            media_kind="voice",
-            source=audio_path,
-            source_is_path=True,
-            caption=caption,
-            reply_to=reply_to,
-            metadata=metadata,
-        )
-        if result is not None:
-            return result
-        return await super().send_voice(
-            chat_id,
-            audio_path,
-            caption=caption,
-            reply_to=reply_to,
-            metadata=metadata,
-            **kwargs,
-        )
 
     async def send_video(
         self,

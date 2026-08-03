@@ -2188,55 +2188,6 @@ class MatrixAdapter(BasePlatformAdapter):
             chat_id, file_path, "m.file", caption, reply_to, file_name, metadata
         )
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> SendResult:
-        """Upload an audio file as a voice message (MSC3245 native voice).
-
-        Matrix voice bubbles require Opus in an Ogg container (MSC3245), but
-        callers can reach this with any audio format — e.g. a model-invoked
-        ``text_to_speech`` result routed through gateway media delivery, not
-        just ``_send_voice_reply``. Enforce the codec at this boundary:
-        transcode non-Ogg input to Ogg/Opus (best-effort — if ffmpeg is
-        unavailable the original file is sent unchanged, preserving the
-        previous behaviour).
-        """
-        converted_path: Optional[str] = None
-        send_path = audio_path
-        if not str(audio_path).lower().endswith((".ogg", ".oga", ".opus")):
-            converted_path = await asyncio.to_thread(
-                _matrix_transcode_voice_to_ogg, audio_path
-            )
-            if converted_path:
-                send_path = converted_path
-        try:
-            return await self._send_local_file(
-                chat_id,
-                send_path,
-                "m.audio",
-                caption,
-                reply_to,
-                # keep the caller's basename (the temp transcode file has a
-                # generated name) so the event body stays meaningful
-                file_name=(
-                    Path(audio_path).with_suffix(".ogg").name
-                    if converted_path
-                    else None
-                ),
-                metadata=metadata,
-                is_voice=True,
-            )
-        finally:
-            if converted_path:
-                try:
-                    os.unlink(converted_path)
-                except OSError:
-                    pass
 
     async def send_video(
         self,
@@ -3220,7 +3171,7 @@ class MatrixAdapter(BasePlatformAdapter):
         elif msgtype == "m.audio":
             if source_content.get("org.matrix.msc3245.voice") is not None:
                 is_voice_message = True
-                msg_type = MessageType.VOICE
+                msg_type = MessageType.AUDIO
             else:
                 msg_type = MessageType.AUDIO
             media_type = event_mimetype or "audio/ogg"
@@ -3295,7 +3246,7 @@ class MatrixAdapter(BasePlatformAdapter):
                             ext = ext_map.get(media_type, ".jpg")
                             cached_path = cache_image_from_bytes(file_bytes, ext=ext)
                             logger.info("[Matrix] Cached user image at %s", cached_path)
-                        elif msg_type in {MessageType.AUDIO, MessageType.VOICE}:
+                        elif msg_type in {MessageType.AUDIO, MessageType.AUDIO}:
                             ext = (
                                 Path(
                                     body

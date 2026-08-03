@@ -170,7 +170,7 @@ async def test_caf_attachment_named_promoted_to_voice(
 
     assert len(captured) == 1
     ev = captured[0]
-    assert ev.message_type == MessageType.VOICE
+    assert ev.message_type == MessageType.AUDIO
     assert ev.media_types == ["audio/x-caf"]
     assert len(ev.media_urls) == 1
     cached = Path(ev.media_urls[0])

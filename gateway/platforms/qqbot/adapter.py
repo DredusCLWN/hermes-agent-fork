@@ -1637,7 +1637,7 @@ class QQAdapter(BasePlatformAdapter):
             return MessageType.PHOTO
         first_type = media_types[0].lower() if media_types else ""
         if "audio" in first_type or "voice" in first_type or "silk" in first_type:
-            return MessageType.VOICE
+            return MessageType.AUDIO
         if "video" in first_type:
             return MessageType.VIDEO
         if "image" in first_type or "photo" in first_type:
@@ -2813,19 +2813,6 @@ class QQAdapter(BasePlatformAdapter):
             chat_id, image_path, MEDIA_TYPE_IMAGE, "image", caption, reply_to
         )
 
-    async def send_voice(
-            self,
-            chat_id: str,
-            audio_path: str,
-            caption: Optional[str] = None,
-            reply_to: Optional[str] = None,
-            **kwargs,
-    ) -> SendResult:
-        """Send a voice message natively."""
-        del kwargs
-        return await self._send_media(
-            chat_id, audio_path, MEDIA_TYPE_VOICE, "voice", caption, reply_to
-        )
 
     async def send_video(
             self,

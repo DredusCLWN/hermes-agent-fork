@@ -272,7 +272,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     requestGateway
   })
 
-  const { refreshHermesConfig, sttEnabled, voiceMaxRecordingSeconds } = useHermesConfig({ activeSessionIdRef })
+  const { refreshHermesConfig } = useHermesConfig({ activeSessionIdRef })
 
   const { applySavedMainModel, refreshCurrentModel, selectModel } = useModelControls({
     queryClient,
@@ -565,8 +565,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     reloadFromMessage,
     restoreToMessage,
     steerPrompt,
-    submitText,
-    transcribeVoiceAudio
+    submitText
   } = usePromptActions({
     activeSessionId,
     activeSessionIdRef,
@@ -583,7 +582,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     resumeStoredSession: resumeSession,
     selectedStoredSessionIdRef,
     startFreshSessionDraft,
-    sttEnabled,
     updateSessionState
   })
 
@@ -846,7 +844,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     onSubmit: submitText,
     onThreadMessagesChange: handleThreadMessagesChange,
     onToggleSelectedPin: toggleSelectedPin,
-    onTranscribeAudio: transcribeVoiceAudio,
     onTriggerCronJob: jobId => {
       void triggerCronJob(jobId)
         .then(() => refreshCronJobs())
@@ -892,11 +889,9 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     [actions, agentsOpen, chatOpen, commandCenterOpen]
   )
 
-  // The voice cap changes only on config load; the gateway instance + all
-  // chat reactivity are subscribed inside ChatRoutesSurface / ChatView.
   const chatRoutesNode = useMemo(
-    () => <ChatRoutesSurface actions={actions} maxVoiceRecordingSeconds={voiceMaxRecordingSeconds} />,
-    [actions, voiceMaxRecordingSeconds]
+    () => <ChatRoutesSurface actions={actions} />,
+    [actions]
   )
 
   const api = useMemo<WiringApi>(

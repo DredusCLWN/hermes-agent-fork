@@ -1191,56 +1191,6 @@ class WhatsAppCloudAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             chat_id, video_path, "video", caption=caption, reply_to=reply_to
         )
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        **kwargs,
-    ) -> SendResult:
-        """Send an audio file as a WhatsApp voice message.
-
-        WhatsApp renders ``audio/ogg; codecs=opus`` as the green
-        voice-note bubble; other audio types (MP3, AAC, etc.) appear as
-        a generic audio attachment. Hermes TTS produces MP3, so we try
-        ffmpeg conversion to opus first and fall back to sending the
-        MP3 as-is when ffmpeg is unavailable.
-        """
-        source = audio_path
-        mime_type: Optional[str] = None
-
-        is_local_mp3 = (
-            not audio_path.startswith(("http://", "https://"))
-            and audio_path.lower().endswith(".mp3")
-            and os.path.exists(audio_path)
-        )
-        if is_local_mp3:
-            opus_path = await self._convert_to_opus(audio_path)
-            if opus_path:
-                try:
-                    result = await self._send_media_from_path_or_link(
-                        chat_id, opus_path, "audio",
-                        caption=caption, reply_to=reply_to,
-                        mime_type="audio/ogg; codecs=opus",
-                    )
-                finally:
-                    # The .ogg is a transient conversion artifact next to
-                    # the source MP3 — clean it up after upload so voice
-                    # sends don't leak a file per message.
-                    try:
-                        os.unlink(opus_path)
-                    except OSError:
-                        pass
-                return result
-            # Will deliver as MP3 attachment, not voice bubble.
-            # Warn-once is logged inside _convert_to_opus.
-            mime_type = "audio/mpeg"
-
-        return await self._send_media_from_path_or_link(
-            chat_id, source, "audio",
-            caption=caption, reply_to=reply_to, mime_type=mime_type,
-        )
 
     async def send_document(
         self,
@@ -1941,8 +1891,8 @@ class WhatsAppCloudAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             "text": MessageType.TEXT,
             "image": MessageType.PHOTO,
             "video": MessageType.VIDEO,
-            "audio": MessageType.VOICE,
-            "voice": MessageType.VOICE,
+            "audio": MessageType.AUDIO,
+            "voice": MessageType.AUDIO,
             "document": MessageType.DOCUMENT,
             "sticker": MessageType.PHOTO,
             "button": MessageType.TEXT,

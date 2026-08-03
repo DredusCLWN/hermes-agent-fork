@@ -111,8 +111,6 @@ platforms: [macos, linux]     # macOS and Linux
 
 当 skill 响应（或任何 agent 响应）包含指向媒体文件的裸绝对路径时——例如 `/home/user/screenshots/diagram.png`——gateway 会自动检测到它，将其从可见文本中剥离，并以原生方式将文件传递给用户的聊天界面（Telegram 图片、Discord 附件等），而不是在消息中留下原始路径。
 
-对于音频，`[[audio_as_voice]]` 指令会将音频文件提升为在支持该功能的平台（Telegram、WhatsApp）上的原生语音消息气泡。
-
 ### 强制文档式传递：`[[as_document]]`
 
 有时你需要与内联预览**相反**的效果：你希望文件作为可下载附件传递，而不是经过重新压缩的图片气泡。典型示例是高分辨率截图或图表——Telegram 的 `sendPhoto` 会将其重新压缩至约 200 KB、1280 px，严重影响可读性。通过 `sendDocument` 发送的 1-2 MB PNG 则保留原始字节完整无损。
@@ -127,7 +125,7 @@ Here is your rendered chart:
 [[as_document]]
 ```
 
-该指令在传递前会被剥离，用户不会看到它。粒度有意设计为每个响应全有或全无：发出一次 `[[as_document]]`，同一响应中的每个图片路径都会作为文档传递。这与 `[[audio_as_voice]]` 的作用范围一致。
+该指令在传递前会被剥离，用户不会看到它。粒度有意设计为每个响应全有或全无：发出一次 `[[as_document]]`，同一响应中的每个图片路径都会作为文档传递。
 
 在以下情况下从 skill 中使用它：
 

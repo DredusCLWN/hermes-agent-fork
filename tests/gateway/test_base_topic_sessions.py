@@ -141,7 +141,7 @@ class TestTelegramAutoTtsCaptionDelivery:
     def _make_voice_event(chat_id: str = "-1001", thread_id: str = "17585") -> MessageEvent:
         return MessageEvent(
             text="hello",
-            message_type=MessageType.VOICE,
+            message_type=MessageType.AUDIO,
             source=SessionSource(
                 platform=Platform.TELEGRAM,
                 chat_id=chat_id,

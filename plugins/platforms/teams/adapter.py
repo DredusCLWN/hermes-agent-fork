@@ -1323,22 +1323,6 @@ class TeamsAdapter(BasePlatformAdapter):
             media_label="video",
         )
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ) -> SendResult:
-        return await self._send_media_attachment(
-            chat_id=chat_id,
-            source=audio_path,
-            default_mime="audio/mpeg",
-            caption=caption,
-            media_label="voice",
-        )
 
     async def send_document(
         self,

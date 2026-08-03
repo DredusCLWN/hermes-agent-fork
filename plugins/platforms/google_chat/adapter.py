@@ -2917,19 +2917,6 @@ class GoogleChatAdapter(BasePlatformAdapter):
             override_filename=file_name,
         )
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        **kwargs: Any,
-    ) -> SendResult:
-        return await self._send_file(
-            chat_id, audio_path, caption,
-            mime_hint="audio/ogg",
-            thread_id=self._resolve_thread_id(reply_to, kwargs.get("metadata"), chat_id=chat_id),
-        )
 
     async def send_video(
         self,

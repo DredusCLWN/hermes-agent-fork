@@ -107,11 +107,9 @@ export const StatusbarSurface = memo(function StatusbarSurface({
  *  only this surface. ChatView subscribes to its own session atoms, so
  *  streaming never round-trips through the controller. */
 export const ChatRoutesSurface = memo(function ChatRoutesSurface({
-  actions,
-  maxVoiceRecordingSeconds
+  actions
 }: {
   actions: WiringActions
-  maxVoiceRecordingSeconds?: number
 }) {
   const activeGatewayProfile = useStore($activeGatewayProfile)
   const gatewayState = useStore($gatewayState)
@@ -145,7 +143,6 @@ export const ChatRoutesSurface = memo(function ChatRoutesSurface({
   const chatView = (
     <ChatView
       gateway={gateway}
-      maxVoiceRecordingSeconds={maxVoiceRecordingSeconds}
       modelMenuContent={modelMenuContent}
       {...chatActions}
     />

@@ -644,17 +644,6 @@ class BlueBubblesAdapter(BasePlatformAdapter):
     ) -> SendResult:
         return await self._send_attachment(chat_id, image_path, caption=caption)
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        **kwargs,
-    ) -> SendResult:
-        return await self._send_attachment(
-            chat_id, audio_path, caption=caption, is_audio_message=True
-        )
 
     async def send_video(
         self,
@@ -950,7 +939,7 @@ class BlueBubblesAdapter(BasePlatformAdapter):
                 elif mime.startswith("audio/") or (att.get("uti") or "").endswith(
                     "caf"
                 ):
-                    msg_type = MessageType.VOICE
+                    msg_type = MessageType.AUDIO
                 elif mime.startswith("video/"):
                     msg_type = MessageType.VIDEO
                 else:

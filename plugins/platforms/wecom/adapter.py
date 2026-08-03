@@ -856,7 +856,7 @@ class WeComAdapter(BasePlatformAdapter):
         if any(mtype.startswith("image/") for mtype in media_types):
             return MessageType.TEXT if text else MessageType.PHOTO
         if str(body.get("msgtype") or "").lower() == "voice":
-            return MessageType.VOICE
+            return MessageType.AUDIO
         return MessageType.TEXT
 
     # ------------------------------------------------------------------
@@ -1498,21 +1498,6 @@ class WeComAdapter(BasePlatformAdapter):
             reply_to=reply_to,
         )
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        **kwargs,
-    ) -> SendResult:
-        del kwargs
-        return await self._send_media_source(
-            chat_id=chat_id,
-            media_source=audio_path,
-            caption=caption,
-            reply_to=reply_to,
-        )
 
     async def send_video(
         self,

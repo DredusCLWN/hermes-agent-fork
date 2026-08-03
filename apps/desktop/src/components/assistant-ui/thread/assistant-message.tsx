@@ -26,14 +26,12 @@ import { Codicon } from '@/components/ui/codicon'
 import { CopyButton } from '@/components/ui/copy-button'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
-import { AudioLines, GitForkIcon, Loader2Icon, RefreshCwIcon, SmilePlusIcon, VolumeXIcon, XIcon } from '@/lib/icons'
+import { GitForkIcon, Loader2Icon, RefreshCwIcon, SmilePlusIcon, XIcon } from '@/lib/icons'
 import { extractPreviewTargets } from '@/lib/preview-targets'
 import { formatAgo } from '@/lib/time'
 import { useEnterAnimation } from '@/lib/use-enter-animation'
 import { cn } from '@/lib/utils'
-import { playSpeechText, stopVoicePlayback } from '@/lib/voice-playback'
 import { notifyError } from '@/store/notifications'
-import { $voicePlayback } from '@/store/voice-playback'
 
 // Stable empty identity for the settled-parts selector — a fresh [] per render
 // would re-derive the changed-files card on every message re-render.
@@ -211,7 +209,6 @@ const AssistantActionBar: FC<MessageActionProps> = ({ messageId, getMessageText,
           </TooltipIconButton>
         )}
         <CopyButton appearance="icon" buttonSize="icon" label={copy.copy} text={getMessageText} />
-        <ReadAloudButton getText={getMessageText} messageId={messageId} />
         <ActionBarPrimitive.Reload asChild>
           <TooltipIconButton onClick={() => triggerHaptic('submit')} tooltip={copy.refresh}>
             <RefreshCwIcon className="size-3.5" />
@@ -255,48 +252,6 @@ const AssistantActionBar: FC<MessageActionProps> = ({ messageId, getMessageText,
         </ReactionPicker>
       )}
     </div>
-  )
-}
-
-const ReadAloudButton: FC<{ getText: () => string; messageId: string }> = ({ getText, messageId }) => {
-  const { t } = useI18n()
-  const copy = t.assistant.thread
-  const voicePlayback = useStore($voicePlayback)
-
-  const readAloudStatus =
-    voicePlayback.source === 'read-aloud' && voicePlayback.messageId === messageId ? voicePlayback.status : 'idle'
-
-  const isPreparing = readAloudStatus === 'preparing'
-  const isSpeaking = readAloudStatus === 'speaking'
-  const anyPlaybackActive = voicePlayback.status !== 'idle'
-  const Icon = isPreparing ? Loader2Icon : isSpeaking ? VolumeXIcon : AudioLines
-  const tooltip = isPreparing ? copy.preparingAudio : isSpeaking ? copy.stopReading : copy.readAloud
-
-  const read = useCallback(async () => {
-    const text = getText()
-
-    if (!text || $voicePlayback.get().status !== 'idle') {
-      return
-    }
-
-    try {
-      await playSpeechText(text, { messageId, source: 'read-aloud' })
-    } catch (error) {
-      notifyError(error, copy.readAloudFailed)
-    }
-  }, [copy.readAloudFailed, getText, messageId])
-
-  return (
-    <TooltipIconButton
-      disabled={isPreparing || (!isSpeaking && anyPlaybackActive)}
-      onClick={() => {
-        triggerHaptic('selection')
-        void (isSpeaking ? stopVoicePlayback() : read())
-      }}
-      tooltip={tooltip}
-    >
-      <Icon className={cn('size-3.5', isPreparing && 'animate-spin')} />
-    </TooltipIconButton>
   )
 }
 

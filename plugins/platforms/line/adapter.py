@@ -169,7 +169,7 @@ _LINE_MESSAGE_TYPES = {
     "text": MessageType.TEXT,
     "image": MessageType.PHOTO,
     "video": MessageType.VIDEO,
-    "audio": MessageType.VOICE,
+    "audio": MessageType.AUDIO,
     "file": MessageType.DOCUMENT,
     "location": MessageType.LOCATION,
     "sticker": MessageType.STICKER,
@@ -1429,29 +1429,6 @@ class LineAdapter(BasePlatformAdapter):
             msgs.append(_text_message(caption))
         return await self._send_messages(chat_id, msgs)
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        duration_ms: int = 1000,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> SendResult:
-        path = Path(audio_path)
-        if not path.exists() or not path.is_file():
-            return SendResult(success=False, error=f"audio file not found: {audio_path}")
-        if path.stat().st_size > LINE_AV_MAX_BYTES:
-            return SendResult(success=False, error="audio exceeds 200 MB LINE limit")
-        if not self._client:
-            return SendResult(success=False, error="LINE adapter not connected")
-        if self._missing_public_url():
-            return SendResult(
-                success=False,
-                error="LINE_PUBLIC_URL must be set to send audio",
-            )
-
-        token = self._register_media(str(path.resolve()))
-        url = self._media_url(token, path.name)
-        return await self._send_messages(chat_id, [_audio_message(url, duration_ms)])
 
     async def send_video(
         self,

@@ -1211,7 +1211,7 @@ class PhotonAdapter(BasePlatformAdapter):
             # when no name is supplied, so the MIME type is the reliable signal.
             if not is_voice and (name.lower().endswith(".caf") or mime == "audio/x-caf"):
                 is_voice = True
-            mtype = MessageType.VOICE if is_voice else _attachment_message_type(mime)
+            mtype = MessageType.AUDIO if is_voice else _attachment_message_type(mime)
             cached = _cache_inbound_attachment(
                 payload, name, mime, force_audio=is_voice
             )
@@ -2013,18 +2013,6 @@ class PhotonAdapter(BasePlatformAdapter):
             chat_id, image_path, caption=caption,
         )
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ) -> SendResult:
-        return await self._sidecar_send_attachment(
-            chat_id, audio_path, caption=caption, kind="voice",
-        )
 
     async def send_video(
         self,

@@ -2544,7 +2544,7 @@ def _event_media_is_audio(event, index: int) -> bool:
     mtype = _event_media_type_at(event, index)
     if mtype:
         return mtype.startswith("audio/")
-    return getattr(event, "message_type", None) in {MessageType.VOICE, MessageType.AUDIO}
+    return getattr(event, "message_type", None) in {MessageType.AUDIO, MessageType.AUDIO}
 
 
 
@@ -14976,7 +14976,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 # mis-routed here as an image and the provider 400s.
                 if _event_media_is_image(event, i):
                     image_paths.append(path)
-                if event.message_type in (MessageType.AUDIO, MessageType.VOICE):
+                if event.message_type in (MessageType.AUDIO, MessageType.AUDIO):
                     audio_file_paths.append(path)
                 if mtype.startswith("video/") or (not mtype and event.message_type == MessageType.VIDEO):
                     video_paths.append(path)

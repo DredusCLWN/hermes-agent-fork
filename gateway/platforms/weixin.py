@@ -989,7 +989,7 @@ def _message_type_from_media(media_types: List[str], text: str) -> MessageType:
     if any(m.startswith("video/") for m in media_types):
         return MessageType.VIDEO
     if any(m.startswith("audio/") for m in media_types):
-        return MessageType.VOICE
+        return MessageType.AUDIO
     if media_types:
         return MessageType.DOCUMENT
     if text.startswith("/"):
@@ -2077,32 +2077,6 @@ class WeixinAdapter(BasePlatformAdapter):
             logger.error("[%s] send_video failed to=%s: %s", self.name, _safe_id(chat_id), exc)
             return SendResult(success=False, error=str(exc))
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> SendResult:
-        if not self._send_session or not self._token:
-            return SendResult(success=False, error="Not connected")
-
-        # Native outbound Weixin voice bubbles are not proven-working in the
-        # upstream reference implementation. Prefer a reliable file attachment
-        # fallback so users at least receive playable audio, even for .silk.
-        fallback_caption = caption or "[voice message as attachment]"
-        try:
-            message_id = await self._send_file(
-                chat_id,
-                audio_path,
-                fallback_caption,
-                force_file_attachment=True,
-            )
-            return SendResult(success=True, message_id=message_id)
-        except Exception as exc:
-            logger.error("[%s] send_voice failed to=%s: %s", self.name, _safe_id(chat_id), exc)
-            return SendResult(success=False, error=str(exc))
 
     async def _download_remote_media(self, url: str) -> str:
         from tools.url_safety import is_safe_url

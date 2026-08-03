@@ -412,7 +412,7 @@ class TestExtractMedia:
         msg_type, urls, mtypes = DingTalkAdapter._extract_media(
             DingTalkAdapter, msg
         )
-        assert msg_type == MessageType.VOICE
+        assert msg_type == MessageType.AUDIO
         assert urls == ["dl_voice_rt"]
         assert mtypes == ["audio"]
 

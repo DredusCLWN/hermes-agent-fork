@@ -894,7 +894,7 @@ class DingTalkAdapter(BasePlatformAdapter):
                                     # "audio" comes from file uploads only;
                                     # keep those as AUDIO (no auto-STT).
                                     if item_type == "voice":
-                                        msg_type = MessageType.VOICE
+                                        msg_type = MessageType.AUDIO
                                     else:
                                         msg_type = MessageType.AUDIO
                             elif mapped == "video":
@@ -927,7 +927,7 @@ class DingTalkAdapter(BasePlatformAdapter):
             # The recognition text from extensions['content']['recognition']
             # is sufficient and already extracted by _extract_text.
             if msg_type == MessageType.TEXT:
-                msg_type = MessageType.VOICE
+                msg_type = MessageType.AUDIO
         elif msg_type_str in ("file", "image"):
             extensions = getattr(message, "extensions", {}) or {}
             ext_content = extensions.get("content", {})

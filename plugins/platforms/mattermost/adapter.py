@@ -465,18 +465,6 @@ class MattermostAdapter(BasePlatformAdapter):
             chat_id, file_path, caption, reply_to, file_name, metadata
         )
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> SendResult:
-        """Upload an audio file."""
-        return await self._send_local_file(
-            chat_id, audio_path, caption, reply_to, metadata=metadata
-        )
 
     async def send_video(
         self,
@@ -945,7 +933,7 @@ class MattermostAdapter(BasePlatformAdapter):
             if any(m.startswith("image/") for m in media_types):
                 msg_type = MessageType.PHOTO
             elif any(m.startswith("audio/") for m in media_types):
-                msg_type = MessageType.VOICE
+                msg_type = MessageType.AUDIO
             elif media_types:
                 msg_type = MessageType.DOCUMENT
 

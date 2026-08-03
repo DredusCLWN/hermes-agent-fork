@@ -2188,24 +2188,6 @@ class FeishuAdapter(BasePlatformAdapter):
         tmp_path.write_text(answer, encoding="utf-8")
         tmp_path.replace(response_path)
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        **kwargs,
-    ) -> SendResult:
-        """Send audio to Feishu as a file attachment plus optional caption."""
-        return await self._send_uploaded_file_message(
-            chat_id=chat_id,
-            file_path=audio_path,
-            reply_to=reply_to,
-            metadata=metadata,
-            caption=caption,
-            outbound_message_type="audio",
-        )
 
     async def send_document(
         self,
@@ -3887,7 +3869,7 @@ class FeishuAdapter(BasePlatformAdapter):
             # reaches the agent as an untranscribable AUDIO attachment and is
             # silently ignored. Follow-up to #28993, which added native
             # voice-note transcription for Discord + DingTalk.
-            return MessageType.VOICE
+            return MessageType.AUDIO
         if preferred == "document":
             return self._resolve_media_message_type(media_types[0] if media_types else "", default=MessageType.DOCUMENT)
         return MessageType.TEXT

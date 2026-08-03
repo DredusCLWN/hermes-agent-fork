@@ -2043,7 +2043,7 @@ class ClassifyMessageTypeMiddleware(InboundMiddleware):
             if etype == "TIMImageElem":
                 return MessageType.PHOTO
             if etype == "TIMSoundElem":
-                return MessageType.VOICE
+                return MessageType.AUDIO
             if etype == "TIMVideoFileElem":
                 return MessageType.VIDEO
             if etype == "TIMFileElem":

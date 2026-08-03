@@ -196,29 +196,6 @@ class TestExtractMedia:
         assert media[0][1] is False  # no voice tag
 
 
-    def test_voice_directive_only_taints_audio_files(self):
-        """[[audio_as_voice]] is message-global but must only flag audio files.
-
-        A non-audio file marked is_voice is excluded from the embedded-photo
-        batch and falls through to send_document, so an image sharing a
-        message with a voice note used to arrive as a file attachment
-        (#44826).
-        """
-        content = "[[audio_as_voice]]\nMEDIA:/tmp/pic.png\nMEDIA:/tmp/voice.ogg"
-        media, cleaned = BasePlatformAdapter.extract_media(content)
-        flags = dict(media)
-        assert flags["/tmp/pic.png"] is False
-        assert flags["/tmp/voice.ogg"] is True
-        assert "[[audio_as_voice]]" not in cleaned
-
-    def test_voice_directive_skips_video_and_documents(self):
-        content = "[[audio_as_voice]]\nMEDIA:/tmp/clip.mp4\nMEDIA:/tmp/report.pdf\nMEDIA:/tmp/note.opus"
-        media, _ = BasePlatformAdapter.extract_media(content)
-        flags = dict(media)
-        assert flags["/tmp/clip.mp4"] is False
-        assert flags["/tmp/report.pdf"] is False
-        assert flags["/tmp/note.opus"] is True
-
     def test_multiple_media_tags(self):
         content = "MEDIA:/a.ogg\nMEDIA:/b.ogg"
         media, _ = BasePlatformAdapter.extract_media(content)
@@ -250,27 +227,14 @@ class TestExtractMedia:
 
     def test_as_document_directive_stripped_from_cleaned_text(self):
         """[[as_document]] is a routing directive — strip it from
-        user-visible text just like [[audio_as_voice]]. Callers detect the
-        directive on the original content (before extract_media)."""
+        user-visible text. Callers detect the directive on the original
+        content (before extract_media)."""
         content = "Here is your infographic:\n[[as_document]]\nMEDIA:/tmp/x.jpg"
         media, cleaned = BasePlatformAdapter.extract_media(content)
         assert media == [("/tmp/x.jpg", False)]
         assert "[[as_document]]" not in cleaned
         assert "Here is your infographic" in cleaned
 
-
-    def test_both_directives_can_coexist(self):
-        """A response could (rarely) contain both [[audio_as_voice]] for an
-        ogg file AND [[as_document]] for an attached image. The voice flag
-        propagates per-tuple; [[as_document]] is detected at dispatch."""
-        content = "[[audio_as_voice]]\n[[as_document]]\nMEDIA:/tmp/x.ogg"
-        media, cleaned = BasePlatformAdapter.extract_media(content)
-        # Voice flag is propagated to every media tuple (this matches the
-        # existing extract_media contract)
-        assert media == [("/tmp/x.ogg", True)]
-        # Both directives stripped from cleaned text
-        assert "[[audio_as_voice]]" not in cleaned
-        assert "[[as_document]]" not in cleaned
 
     # Windows path support — regression coverage for #34632
 
@@ -347,12 +311,6 @@ class TestMediaInsideSerializedJson:
         )
         assert len(media) == 1 and media[0][0] == "/path/with space/file.png"
 
-    def test_tts_two_line_still_extracted(self):
-        media, _ = BasePlatformAdapter.extract_media(
-            "[[audio_as_voice]]\nMEDIA:/tmp/v.ogg"
-        )
-        assert len(media) == 1 and media[0][0] == "/tmp/v.ogg"
-        assert media[0][1] is True  # voice flag
 
     # --- cleaned-text invariants: real tags stripped, JSON data kept verbatim ---
 

@@ -5,7 +5,7 @@ import chalk from 'chalk'
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { AUDIO_DIRECTIVE_RE, INLINE_RE, Md, MEDIA_LINE_RE, stripInlineMarkup } from '../components/markdown.js'
+import { INLINE_RE, Md, MEDIA_LINE_RE, stripInlineMarkup } from '../components/markdown.js'
 import { __resetLinkTitleCache, fetchLinkTitle } from '../lib/externalLink.js'
 import { stripAnsi } from '../lib/text.js'
 import { DEFAULT_THEME, LIGHT_THEME } from '../theme.js'
@@ -52,9 +52,9 @@ const renderPlain = (node: React.ReactNode) => {
 
   const instance = renderSync(node, {
     patchConsole: false,
-    stderr: stderr as NodeJS.WriteStream,
-    stdin: stdin as NodeJS.ReadStream,
-    stdout: stdout as NodeJS.WriteStream
+    stderr: stderr as unknown as NodeJS.WriteStream,
+    stdin: stdin as unknown as NodeJS.ReadStream,
+    stdout: stdout as unknown as NodeJS.WriteStream
   })
 
   instance.unmount()
@@ -211,11 +211,6 @@ describe('protocol sentinels', () => {
     expect('the media: section is empty'.match(MEDIA_LINE_RE)).toBeNull()
   })
 
-  it('matches the [[audio_as_voice]] directive', () => {
-    expect(AUDIO_DIRECTIVE_RE.test('[[audio_as_voice]]')).toBe(true)
-    expect(AUDIO_DIRECTIVE_RE.test('  [[audio_as_voice]]  ')).toBe(true)
-    expect(AUDIO_DIRECTIVE_RE.test('audio_as_voice')).toBe(false)
-  })
 })
 
 describe('Md wrapping', () => {
@@ -399,9 +394,9 @@ describe('body prose stays in the theme palette', () => {
       React.createElement(Box, { width: 70 }, React.createElement(Md, { cols: 68, t: LIGHT_THEME, text })),
       {
         patchConsole: false,
-        stderr: stderr as NodeJS.WriteStream,
-        stdin: stdin as NodeJS.ReadStream,
-        stdout: stdout as NodeJS.WriteStream
+        stderr: stderr as unknown as NodeJS.WriteStream,
+        stdin: stdin as unknown as NodeJS.ReadStream,
+        stdout: stdout as unknown as NodeJS.WriteStream
       }
     )
 

@@ -6138,7 +6138,7 @@ class SlackAdapter(BasePlatformAdapter):
             elif any(m.startswith("video/") for m in media_types):
                 msg_type = MessageType.VIDEO
             elif any(m.startswith("audio/") for m in media_types):
-                msg_type = MessageType.VOICE
+                msg_type = MessageType.AUDIO
             else:
                 msg_type = MessageType.DOCUMENT
 

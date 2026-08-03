@@ -34,7 +34,7 @@ def _make_voice_event(text: str = "voice_message_1.ogg") -> MessageEvent:
     source = _make_source()
     return MessageEvent(
         text=text,
-        message_type=MessageType.VOICE,
+        message_type=MessageType.AUDIO,
         source=source,
         message_id="m1",
         media_urls=["/tmp/voice_message_1.ogg"],

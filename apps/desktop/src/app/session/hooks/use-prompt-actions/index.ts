@@ -2,7 +2,7 @@ import type { AppendMessage, ThreadMessage } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
 import { type MutableRefObject, useCallback, useEffect, useRef } from 'react'
 
-import { PROMPT_SUBMIT_REQUEST_TIMEOUT_MS, transcribeAudio } from '@/hermes'
+import { PROMPT_SUBMIT_REQUEST_TIMEOUT_MS } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { stripAnsi } from '@/lib/ansi'
 import { type ChatMessage, textPart } from '@/lib/chat-messages'
@@ -61,7 +61,6 @@ import {
 import { useSlashCommand } from './slash'
 import { useSubmitPrompt } from './submit'
 import {
-  blobToDataUrl,
   delay,
   friendlyRemoteAttachError,
   type GatewayRequest,
@@ -198,7 +197,6 @@ interface PromptActionsOptions {
   resumeStoredSession: (storedSessionId: string) => Promise<void> | void
   selectedStoredSessionIdRef: MutableRefObject<string | null>
   startFreshSessionDraft: () => void
-  sttEnabled: boolean
   updateSessionState: (
     sessionId: string,
     updater: (state: ClientSessionState) => ClientSessionState,
@@ -229,7 +227,6 @@ export function usePromptActions({
   resumeStoredSession,
   selectedStoredSessionIdRef,
   startFreshSessionDraft,
-  sttEnabled,
   updateSessionState
 }: PromptActionsOptions) {
   const { t } = useI18n()
@@ -555,20 +552,6 @@ export function usePromptActions({
       return await submitPromptText(rawText, options)
     },
     [executeSlashCommand, submitPromptText]
-  )
-
-  const transcribeVoiceAudio = useCallback(
-    async (audio: Blob) => {
-      if (!sttEnabled) {
-        throw new Error(copy.sttDisabled)
-      }
-
-      const dataUrl = await blobToDataUrl(audio)
-      const result = await transcribeAudio(dataUrl, audio.type)
-
-      return result.transcript
-    },
-    [copy.sttDisabled, sttEnabled]
   )
 
   const cancelRun = useCallback(async () => {
@@ -954,7 +937,6 @@ export function usePromptActions({
     redirectPrompt,
     /** @deprecated Use `redirectPrompt` — this is an active-turn redirect, not tool steer. */
     steerPrompt: redirectPrompt,
-    submitText,
-    transcribeVoiceAudio
+    submitText
   }
 }

@@ -65,14 +65,6 @@ class TestCleanForDisplay:
         )
         assert "`MEDIA:/path/file.png`" in result
 
-    def test_audio_as_voice_stripped(self):
-        """[[audio_as_voice]] directive is removed."""
-        text = "[[audio_as_voice]]\nMEDIA:/tmp/voice.ogg"
-        result = GatewayStreamConsumer._clean_for_display(text)
-        assert "[[audio_as_voice]]" not in result
-        assert "MEDIA:" not in result
-
-
 # ── Integration: _send_or_edit strips MEDIA: ─────────────────────────────
 
 

@@ -1197,11 +1197,10 @@ class GatewayStreamConsumer:
         """Strip MEDIA: directives and internal markers from text before display.
 
         The streaming path delivers raw text chunks that may include
-        ``MEDIA:<path>`` tags and ``[[audio_as_voice]]`` directives meant for
-        the platform adapter's post-processing.  The actual media files are
-        delivered separately via ``_deliver_media_from_response()`` after the
-        stream finishes — we just need to hide the raw directives from the
-        user.
+        ``MEDIA:<path>`` tags meant for the platform adapter's post-processing.
+        The actual media files are delivered separately via
+        ``_deliver_media_from_response()`` after the stream finishes — we just
+        need to hide the raw directives from the user.
         """
         return _BasePlatformAdapter.strip_media_directives_for_display(text)
 

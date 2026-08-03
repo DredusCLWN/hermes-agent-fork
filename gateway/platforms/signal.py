@@ -719,7 +719,7 @@ class SignalAdapter(BasePlatformAdapter):
         msg_type = MessageType.TEXT
         if media_types:
             if any(mt.startswith("audio/") for mt in media_types):
-                msg_type = MessageType.VOICE
+                msg_type = MessageType.AUDIO
             elif any(mt.startswith("image/") for mt in media_types):
                 msg_type = MessageType.PHOTO
             elif any(mt.startswith("video/") for mt in media_types):
@@ -1481,20 +1481,6 @@ class SignalAdapter(BasePlatformAdapter):
         """
         return await self._send_attachment(chat_id, image_path, "Image", caption)
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        **kwargs,
-    ) -> SendResult:
-        """Send an audio file as a Signal attachment.
-
-        Signal does not distinguish voice messages from file attachments at
-        the API level, so this routes through the same RPC send path.
-        """
-        return await self._send_attachment(chat_id, audio_path, "Audio", caption)
 
     async def send_video(
         self,

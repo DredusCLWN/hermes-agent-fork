@@ -1239,16 +1239,6 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         """Send a video natively via bridge — plays inline in WhatsApp."""
         return await self._send_media_to_bridge(chat_id, video_path, "video", caption)
 
-    async def send_voice(
-        self,
-        chat_id: str,
-        audio_path: str,
-        caption: Optional[str] = None,
-        reply_to: Optional[str] = None,
-        **kwargs,
-    ) -> SendResult:
-        """Send an audio file as a WhatsApp voice message via bridge."""
-        return await self._send_media_to_bridge(chat_id, audio_path, "audio", caption)
 
     async def send_document(
         self,
@@ -1458,7 +1448,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 elif "video" in media_type:
                     msg_type = MessageType.VIDEO
                 elif "ptt" in media_type:  # ptt = WhatsApp voice note
-                    msg_type = MessageType.VOICE
+                    msg_type = MessageType.AUDIO
                 elif "audio" in media_type:
                     msg_type = MessageType.AUDIO
                 else:
@@ -1502,21 +1492,21 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                         print(f"[{self.name}] Using bridge-cached image: {url}", flush=True)
                     else:
                         print(f"[{self.name}] Rejected bridge image path outside cache dir: {url}", flush=True)
-                elif msg_type in {MessageType.VOICE, MessageType.AUDIO} and url.startswith(("http://", "https://")):
+                elif msg_type in {MessageType.AUDIO, MessageType.AUDIO} and url.startswith(("http://", "https://")):
                     try:
                         cached_path = await cache_audio_from_url(url, ext=".ogg")
                         cached_urls.append(cached_path)
-                        media_types.append(bridge_mime or ("audio/ogg" if msg_type == MessageType.VOICE else "audio/mpeg"))
+                        media_types.append(bridge_mime or ("audio/ogg" if msg_type == MessageType.AUDIO else "audio/mpeg"))
                         print(f"[{self.name}] Cached user audio: {cached_path}", flush=True)
                     except Exception as e:
                         print(f"[{self.name}] Failed to cache audio: {e}", flush=True)
                         cached_urls.append(url)
-                        media_types.append(bridge_mime or ("audio/ogg" if msg_type == MessageType.VOICE else "audio/mpeg"))
-                elif msg_type in {MessageType.VOICE, MessageType.AUDIO} and os.path.isabs(url):
+                        media_types.append(bridge_mime or ("audio/ogg" if msg_type == MessageType.AUDIO else "audio/mpeg"))
+                elif msg_type in {MessageType.AUDIO, MessageType.AUDIO} and os.path.isabs(url):
                     # Local file path — bridge already downloaded the audio
                     if _is_allowed_bridge_path(url):
                         cached_urls.append(url)
-                        media_types.append(bridge_mime or ("audio/ogg" if msg_type == MessageType.VOICE else "audio/mpeg"))
+                        media_types.append(bridge_mime or ("audio/ogg" if msg_type == MessageType.AUDIO else "audio/mpeg"))
                         print(f"[{self.name}] Using bridge-cached audio: {url}", flush=True)
                     else:
                         print(f"[{self.name}] Rejected bridge audio path outside cache dir: {url}", flush=True)
@@ -1548,7 +1538,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             if data.get("isGroup"):
                 body = self._clean_bot_mention_text(body, data)
             if (
-                msg_type == MessageType.VOICE
+                msg_type == MessageType.AUDIO
                 and cached_urls
                 and str(body).strip().lower() == "[ptt received]"
             ):

@@ -1,10 +1,10 @@
 """
 Tests for MEDIA tag extraction from tool results.
 
-Verifies that MEDIA tags (e.g., from TTS tool) are only extracted from
-messages in the CURRENT turn, not from the full conversation history.
-This prevents voice messages from accumulating and being sent multiple
-times per reply. (Regression test for #160)
+Verifies that MEDIA tags are only extracted from messages in the CURRENT
+turn, not from the full conversation history. This prevents media
+attachments from accumulating and being sent multiple times per reply.
+(Regression test for #160)
 
 Also covers #34608: a stale MEDIA: path emitted by an execute_code /
 make_image tool several turns earlier must not leak onto a later
@@ -77,7 +77,7 @@ def extract_media_tags_production(result_messages, history_len, history_media_pa
 def extract_media_tags_broken(result_messages):
     """
     The BROKEN behavior: extract MEDIA tags from ALL messages including history.
-    This causes TTS voice messages to accumulate and be re-sent on every reply.
+    This causes media attachments to accumulate and be re-sent on every reply.
     """
     media_tags = []
 
@@ -193,7 +193,7 @@ caption
         "current_path",
         ["/tmp/tts/current.ogg", "/tmp/tts/already-delivered.ogg"],
     )
-    def test_non_streaming_dedup_scopes_tts_paths_to_prior_turns(
+    def test_non_streaming_dedup_scopes_media_paths_to_prior_turns(
         self, current_path
     ):
         from gateway.platforms.base import BasePlatformAdapter
@@ -212,11 +212,11 @@ caption
             {
                 "role": "tool",
                 "tool_call_id": "tts",
-                "content": f"[[audio_as_voice]]\\nMEDIA:{current_path}",
+                "content": f"MEDIA:{current_path}",
             },
             {
                 "role": "assistant",
-                "content": f"[[audio_as_voice]]\\nMEDIA:{current_path}",
+                "content": f"MEDIA:{current_path}",
             },
         ]
         adapter = MagicMock()
@@ -266,7 +266,7 @@ caption
         history = [
             {"role": "user", "content": "Say hello as audio"},
             {"role": "assistant", "content": None, "tool_calls": [{"id": "1", "function": {"name": "text_to_speech"}}]},
-            {"role": "tool", "tool_call_id": "1", "content": '{"success": true, "media_tag": "[[audio_as_voice]]\\nMEDIA:/path/to/audio1.ogg"}'},
+            {"role": "tool", "tool_call_id": "1", "content": '{"success": true, "media_tag": "MEDIA:/path/to/audio1.ogg"}'},
             {"role": "assistant", "content": "I've said hello for you!"},
         ]
         

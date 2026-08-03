@@ -1710,7 +1710,7 @@ def _resolve_extensionless_candidate(path: str) -> Optional[str]:
 
 
 def _strip_media_tag_directives(text: str) -> str:
-    """Remove MEDIA: tags and [[audio_as_voice]] / [[as_document]] markers.
+    """Remove MEDIA: tags and [[as_document]] markers.
 
     Protected spans (fenced code blocks, inline code holding non-deliverable
     example tags, blockquotes, JSON string values) are used as a mask-locator
@@ -1719,11 +1719,10 @@ def _strip_media_tag_directives(text: str) -> str:
     """
     if (
         "MEDIA:" not in text
-        and "[[audio_as_voice]]" not in text
         and "[[as_document]]" not in text
     ):
         return text
-    cleaned = text.replace("[[audio_as_voice]]", "").replace("[[as_document]]", "")
+    cleaned = text.replace("[[as_document]]", "")
 
     # Locate real tag spans on a masked copy (offset-preserving), then delete
     # exactly those spans from the unmasked text — same pattern as
@@ -1915,7 +1914,6 @@ class MessageType(Enum):
     PHOTO = "photo"
     VIDEO = "video"
     AUDIO = "audio"
-    VOICE = "voice"
     DOCUMENT = "document"
     STICKER = "sticker"
     COMMAND = "command"  # /command style
@@ -2490,8 +2488,8 @@ def resolve_channel_skills(
 
 
 def _strip_media_directives(text: str) -> str:
-    """Strip internal delivery directives ([[audio_as_voice]], [[as_document]],
-    MEDIA:<path>) so they never render as visible text.
+    """Strip internal delivery directives ([[as_document]], MEDIA:<path>)
+    so they never render as visible text.
 
     Backstop only: run ``extract_media`` first. MEDIA cleanup uses the shared
     ``MEDIA_TAG_CLEANUP_RE`` (only tags whose path has a known deliverable
