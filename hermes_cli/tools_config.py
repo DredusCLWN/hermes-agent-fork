@@ -104,8 +104,6 @@ CONFIGURABLE_TOOLSETS = [
     ("video_gen",       "🎬 Video Generation",          "video_generate (text/image/reference)"),
     ("bfl",             "🎬 BFL FLUX 3 Video",          "bfl_flux3_*"),
     ("x_search",        "🐦 X (Twitter) Search",        "x_search (requires xAI OAuth or XAI_API_KEY)"),
-    ("tts",             "🔊 Text-to-Speech",            "text_to_speech"),
-    ("stt",             "🎙️ Speech-to-Text",           "voice transcription (gateway voice messages + voice mode)"),
     ("skills",          "📚 Skills",                    "list, view, manage"),
     ("todo",            "📋 Task Planning",             "todo"),
     ("memory",          "💾 Memory",                    "persistent memory across sessions"),
@@ -161,7 +159,7 @@ _DEFAULT_OFF_TOOLSETS = {"homeassistant", "spotify", "discord", "discord_admin",
 # (e.g. ``stt.enabled``), not ``platform_toolsets``. Excluded from the
 # per-platform enable/disable checklist; configured via the "Reconfigure an
 # existing tool" flow and the GUI provider matrix instead.
-_CONFIG_ONLY_TOOLSETS = {"stt"}
+_CONFIG_ONLY_TOOLSETS = set()
 
 
 def _xai_credentials_present() -> bool:
@@ -173,7 +171,7 @@ def _xai_credentials_present() -> bool:
     auth store and environment. The tool's runtime ``check_fn`` still
     gates schema registration if creds later expire or get revoked.
     Also reused by ``provider_readiness_status`` for ``post_setup:
-    "xai_grok"`` picker rows (xAI TTS, Grok OAuth x_search).
+    "xai_grok"`` picker rows (Grok OAuth x_search).
     """
     try:
         from hermes_cli.auth import _read_xai_oauth_tokens
@@ -314,168 +312,6 @@ PLATFORMS = {
 # Toolsets not in this map either need no config or use the simple fallback.
 
 TOOL_CATEGORIES = {
-    "tts": {
-        "name": "Text-to-Speech",
-        "icon": "🔊",
-        "providers": [
-            {
-                "name": "Microsoft Edge TTS",
-                "badge": "★ recommended · free",
-                "tag": "Good quality, no API key needed",
-                "env_vars": [],
-                "tts_provider": "edge",
-            },
-            {
-                "name": "Nous Subscription",
-                "badge": "subscription",
-                "tag": "Managed OpenAI TTS billed to your subscription",
-                "env_vars": [],
-                "tts_provider": "openai",
-                "requires_nous_auth": True,
-                "managed_nous_feature": "tts",
-                "override_env_vars": ["VOICE_TOOLS_OPENAI_KEY", "OPENAI_API_KEY"],
-            },
-            {
-                "name": "OpenAI TTS",
-                "badge": "paid",
-                "tag": "High quality voices",
-                "env_vars": [
-                    {"key": "VOICE_TOOLS_OPENAI_KEY", "prompt": "OpenAI API key", "url": "https://platform.openai.com/api-keys"},
-                ],
-                "tts_provider": "openai",
-            },
-            {
-                "name": "xAI TTS",
-                "tag": "Grok voices — uses xAI Grok OAuth or XAI_API_KEY",
-                "env_vars": [],
-                "tts_provider": "xai",
-                "post_setup": "xai_grok",
-            },
-            {
-                "name": "ElevenLabs",
-                "badge": "paid",
-                "tag": "Most natural voices",
-                "env_vars": [
-                    {"key": "ELEVENLABS_API_KEY", "prompt": "ElevenLabs API key", "url": "https://elevenlabs.io/app/settings/api-keys"},
-                ],
-                "tts_provider": "elevenlabs",
-            },
-            # Mistral Voxtral TTS — `mistralai` SDK lazy-installs on first use.
-            {
-                "name": "Mistral (Voxtral TTS)",
-                "badge": "paid",
-                "tag": "Multilingual, native Opus",
-                "env_vars": [
-                    {"key": "MISTRAL_API_KEY", "prompt": "Mistral API key", "url": "https://console.mistral.ai/"},
-                ],
-                "tts_provider": "mistral",
-            },
-            {
-                "name": "Google Gemini TTS",
-                "badge": "preview",
-                "tag": "30 prebuilt voices, controllable via prompts",
-                "env_vars": [
-                    {"key": "GEMINI_API_KEY", "prompt": "Gemini API key", "url": "https://aistudio.google.com/app/apikey"},
-                ],
-                "tts_provider": "gemini",
-            },
-            {
-                "name": "KittenTTS",
-                "badge": "local · free",
-                "tag": "Lightweight local ONNX TTS (~25MB), no API key",
-                "env_vars": [],
-                "tts_provider": "kittentts",
-                "post_setup": "kittentts",
-            },
-            {
-                "name": "Piper",
-                "badge": "local · free",
-                "tag": "Local neural TTS, 44 languages (voices ~20-90MB)",
-                "env_vars": [],
-                "tts_provider": "piper",
-                "post_setup": "piper",
-            },
-            {
-                "name": "DeepInfra TTS",
-                "badge": "paid",
-                "tag": "Chatterbox, Qwen3-TTS, … — live catalog from api.deepinfra.com",
-                "env_vars": [
-                    {"key": "DEEPINFRA_API_KEY", "prompt": "DeepInfra API key", "url": "https://deepinfra.com/dash/api_keys"},
-                ],
-                "tts_provider": "deepinfra",
-            },
-        ],
-    },
-    "stt": {
-        "name": "Speech-to-Text",
-        "icon": "🎙️",
-        "providers": [
-            {
-                "name": "Local Whisper",
-                "badge": "★ recommended · free",
-                "tag": "faster-whisper on-device, no API key",
-                "env_vars": [],
-                "stt_provider": "local",
-                "post_setup": "faster_whisper",
-            },
-            {
-                "name": "Nous Subscription",
-                "badge": "subscription",
-                "tag": "Managed OpenAI transcription billed to your subscription",
-                "env_vars": [],
-                "stt_provider": "openai",
-                "requires_nous_auth": True,
-                "managed_nous_feature": "stt",
-                "override_env_vars": ["VOICE_TOOLS_OPENAI_KEY", "OPENAI_API_KEY"],
-            },
-            {
-                "name": "OpenAI",
-                "badge": "paid",
-                "tag": "whisper-1, gpt-4o-transcribe, gpt-transcribe",
-                "env_vars": [
-                    {"key": "VOICE_TOOLS_OPENAI_KEY", "prompt": "OpenAI API key", "url": "https://platform.openai.com/api-keys"},
-                ],
-                "stt_provider": "openai",
-            },
-            {
-                "name": "Groq",
-                "badge": "free tier",
-                "tag": "Whisper large-v3 family — very fast",
-                "env_vars": [
-                    {"key": "GROQ_API_KEY", "prompt": "Groq API key", "url": "https://console.groq.com/keys"},
-                ],
-                "stt_provider": "groq",
-            },
-            {
-                "name": "xAI",
-                "tag": "grok-stt — uses xAI Grok OAuth or XAI_API_KEY",
-                "env_vars": [],
-                "stt_provider": "xai",
-                "post_setup": "xai_grok",
-            },
-            {
-                "name": "ElevenLabs Scribe",
-                "badge": "paid",
-                "tag": "scribe_v2 — diarization + audio-event tagging",
-                "env_vars": [
-                    {"key": "ELEVENLABS_API_KEY", "prompt": "ElevenLabs API key", "url": "https://elevenlabs.io/app/settings/api-keys"},
-                ],
-                "stt_provider": "elevenlabs",
-            },
-            # Mistral Voxtral STT intentionally omitted — mistralai PyPI
-            # package quarantined (malicious 2.4.6 release, 2026-05-12).
-            # Restore alongside the dashboard stt.provider option.
-            {
-                "name": "DeepInfra",
-                "badge": "paid",
-                "tag": "Live STT catalog from api.deepinfra.com",
-                "env_vars": [
-                    {"key": "DEEPINFRA_API_KEY", "prompt": "DeepInfra API key", "url": "https://deepinfra.com/dash/api_keys"},
-                ],
-                "stt_provider": "deepinfra",
-            },
-        ],
-    },
     "web": {
         "name": "Web Search & Extract",
         "setup_title": "Select Search Provider",
