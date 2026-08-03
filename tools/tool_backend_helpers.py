@@ -182,8 +182,8 @@ def resolve_provider_secret(
     config read; returns ``""`` when no key is found anywhere.
 
     ``env_getter`` lets callers supply their module-level ``get_env_value``
-    wrapper (transcription_tools / tts_tool expose one that tests patch);
-    when omitted, ``hermes_cli.config.get_env_value`` is used directly.
+    wrapper; when omitted, ``hermes_cli.config.get_env_value`` is used
+    directly.
     """
     value = str(config_value or "").strip()
     if value:
@@ -251,28 +251,6 @@ def resolve_provider_secret(
         )
     return ""
 
-
-def resolve_openai_audio_api_key() -> str:
-    """Prefer the voice-tools key, but fall back to the normal OpenAI key.
-
-    Routed through the profile secret scope rather than reading ``os.environ``
-    directly: in a multiplex gateway serving several profiles from one
-    process, ``os.environ`` reflects whichever profile's ``.env`` happened to
-    load at boot, not the profile the current turn belongs to. A raw read here
-    lets one profile's TTS reply / voice-note transcription authenticate as —
-    and get billed against — a different profile's OpenAI account. Same
-    routing the WeChat send path and ``agent/vertex_adapter`` already use; see
-    ``agent/secret_scope.py``.
-
-    Outside a multiplexed turn, ``OPENAI_API_KEY`` additionally falls back to
-    the credential pool (``hermes auth add openai-api``) via
-    ``resolve_provider_secret`` — same #68003 fix as the other voice
-    providers. The dedicated voice-tools override remains env/scope-only.
-    """
-    return (
-        resolve_provider_secret("VOICE_TOOLS_OPENAI_KEY", "")
-        or resolve_provider_secret("OPENAI_API_KEY", "openai-api")
-    )
 
 
 def prefers_gateway(config_section: str) -> bool:

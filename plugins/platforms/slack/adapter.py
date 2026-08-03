@@ -782,9 +782,8 @@ _SLACK_AUDIO_MIME_TO_EXT = {
     "audio/x-flac": ".flac",
 }
 
-# Extensions OpenAI/Whisper-family STT backends accept (kept in sync with
-# tools/transcription_tools.SUPPORTED_FORMATS).
-_SLACK_STT_SUPPORTED_EXTS = frozenset(
+# Audio file extensions accepted for Slack media caching.
+_SLACK_AUDIO_SUPPORTED_EXTS = frozenset(
     {".mp3", ".mp4", ".mpeg", ".mpga", ".m4a", ".wav", ".webm", ".ogg", ".aac", ".flac"}
 )
 
@@ -813,18 +812,18 @@ def _resolve_slack_audio_ext(file_obj: Dict[str, Any], mimetype: str) -> str:
 
     Resolution order (mirrors the video branch + bluebubbles.py):
 
-    1. The real extension from the uploaded filename, when it's a format a
-       Whisper-family STT backend accepts (so ``audio_message.mp4`` →
-       ``.mp4``, ``clip.m4a`` → ``.m4a``).
+    1. The real extension from the uploaded filename, when it's a known
+       audio container (so ``audio_message.mp4`` → ``.mp4``,
+       ``clip.m4a`` → ``.m4a``).
     2. A mimetype → extension lookup (so ``audio/mp4`` → ``.m4a``).
     3. ``.m4a`` as a last resort — never ``.ogg``, which was the original bug:
-       MP4/AAC voice messages cached as ``.ogg`` are rejected by OpenAI because
-       the bytes don't match the container the extension claims.
+       MP4/AAC audio files cached as ``.ogg`` don't match the container the
+       extension claims.
     """
     name = (file_obj.get("name") or "").strip()
     _, name_ext = os.path.splitext(name)
     name_ext = name_ext.lower()
-    if name_ext in _SLACK_STT_SUPPORTED_EXTS:
+    if name_ext in _SLACK_AUDIO_SUPPORTED_EXTS:
         return name_ext
 
     mime_key = (mimetype or "").split(";", 1)[0].strip().lower()

@@ -21,20 +21,19 @@ def extract_media_tags_fixed(result_messages, history_len):
     """
     Extract MEDIA tags from tool results, but ONLY from new messages
     (those added after history_len). This is the fixed behavior.
-    
+
     Args:
         result_messages: Full list of messages including history + new
         history_len: Length of history before this turn
-        
+
     Returns:
-        Tuple of (media_tags list, has_voice_directive bool)
+        List of media tags.
     """
     media_tags = []
-    has_voice_directive = False
-    
+
     # Only process new messages from this turn
     new_messages = result_messages[history_len:] if len(result_messages) > history_len else []
-    
+
     for msg in new_messages:
         if msg.get("role") == "tool" or msg.get("role") == "function":
             content = msg.get("content", "")
@@ -43,10 +42,8 @@ def extract_media_tags_fixed(result_messages, history_len):
                     path = match.group(1).strip().rstrip('",}')
                     if path:
                         media_tags.append(f"MEDIA:{path}")
-                if "[[audio_as_voice]]" in content:
-                    has_voice_directive = True
-    
-    return media_tags, has_voice_directive
+
+    return media_tags
 
 
 def extract_media_tags_production(result_messages, history_len, history_media_paths):
@@ -59,7 +56,6 @@ def extract_media_tags_production(result_messages, history_len, history_media_pa
     fallback, also used when compression shrinks the list below history_len).
     """
     media_tags = []
-    has_voice_directive = False
 
     if len(result_messages) >= history_len and history_len:
         scan_msgs = result_messages[history_len:]
@@ -74,10 +70,8 @@ def extract_media_tags_production(result_messages, history_len, history_media_pa
                     path = match.group(1).strip().rstrip('",}')
                     if path and path not in history_media_paths:
                         media_tags.append(f"MEDIA:{path}")
-                if "[[audio_as_voice]]" in content:
-                    has_voice_directive = True
 
-    return media_tags, has_voice_directive
+    return media_tags
 
 
 def extract_media_tags_broken(result_messages):
@@ -86,8 +80,7 @@ def extract_media_tags_broken(result_messages):
     This causes TTS voice messages to accumulate and be re-sent on every reply.
     """
     media_tags = []
-    has_voice_directive = False
-    
+
     for msg in result_messages:
         if msg.get("role") == "tool" or msg.get("role") == "function":
             content = msg.get("content", "")
@@ -96,10 +89,8 @@ def extract_media_tags_broken(result_messages):
                     path = match.group(1).strip().rstrip('",}')
                     if path:
                         media_tags.append(f"MEDIA:{path}")
-                if "[[audio_as_voice]]" in content:
-                    has_voice_directive = True
-    
-    return media_tags, has_voice_directive
+
+    return media_tags
 
 
 class TestMediaExtraction:
@@ -134,9 +125,8 @@ caption
             {"role": "assistant", "content": "Use a standalone media message."},
         ]
 
-        tags, voice = _collect_auto_append_media_tags(messages, history_offset=0)
+        tags = _collect_auto_append_media_tags(messages, history_offset=0)
         assert tags == []
-        assert voice is False
 
 
     def test_collect_history_media_paths_includes_image_generate_json(self):
@@ -264,7 +254,7 @@ caption
         # (larger than the shrunken message list), so the collector rescans
         # the full list. With the dedup set populated, the already-delivered
         # image must NOT be re-emitted.
-        tags, _ = _collect_auto_append_media_tags(
+        tags = _collect_auto_append_media_tags(
             history, history_offset=9999, history_media_paths=history_paths
         )
         assert tags == [], f"generated image re-emitted after compression: {tags}"
@@ -290,12 +280,11 @@ caption
         history_len = len(history)
         
         # Fixed behavior: should extract NO media tags (none in new messages)
-        tags, voice_directive = extract_media_tags_fixed(all_messages, history_len)
+        tags = extract_media_tags_fixed(all_messages, history_len)
         assert tags == [], "Fixed extraction should not find tags in history"
-        assert voice_directive is False
-        
+
         # Broken behavior: would incorrectly extract the old media tag
-        broken_tags, broken_voice = extract_media_tags_broken(all_messages)
+        broken_tags = extract_media_tags_broken(all_messages)
         assert len(broken_tags) == 1, "Broken extraction finds tags in history"
         assert "audio1.ogg" in broken_tags[0]
     
@@ -342,18 +331,17 @@ class TestStaleToolMediaLeak:
         # the in-memory tool content, so the path is not in the set).
         history_media_paths = set()
 
-        tags, voice = extract_media_tags_production(
+        tags = extract_media_tags_production(
             all_messages, history_len, history_media_paths
         )
         assert tags == [], (
             "Stale tool MEDIA from a prior turn must not leak onto a "
             f"later text-only reply, got {tags}"
         )
-        assert voice is False
 
         # The pre-fix production behaviour (scan everything, dedup only) would
         # have leaked the stale path when the dedup set missed it.
-        broken_tags, _ = extract_media_tags_broken(all_messages)
+        broken_tags = extract_media_tags_broken(all_messages)
         assert any("seosmi_cover.png" in t for t in broken_tags), (
             "Sanity: the unscoped scan does surface the stale path"
         )
@@ -374,7 +362,7 @@ class TestStaleToolMediaLeak:
         # The old path IS captured in the dedup set here (history scan ran
         # before compression), so it must still be excluded.
         history_media_paths = {"/tmp/old_from_history.png"}
-        tags, _ = extract_media_tags_production(
+        tags = extract_media_tags_production(
             compressed_messages, original_history_len, history_media_paths
         )
         assert tags == [], (

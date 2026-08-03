@@ -178,8 +178,6 @@ class TestFullRepoScan:
             "hermes_cli/main.py",
             "hermes_cli/onepassword_secrets_cli.py",
             "hermes_cli/setup.py",
-            "tools/transcription_tools.py",
-            "tools/tts_tool.py",
         }
 
         # Run the full scan

@@ -21,7 +21,6 @@ from tools.tool_backend_helpers import (
     normalize_browser_cloud_provider,
     normalize_modal_mode,
     resolve_modal_backend_state,
-    resolve_openai_audio_api_key,
 )
 
 

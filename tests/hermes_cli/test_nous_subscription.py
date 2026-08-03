@@ -43,7 +43,6 @@ def test_get_nous_subscription_features_recognizes_direct_exa_backend(monkeypatc
     )
     monkeypatch.setattr(ns, "_toolset_enabled", lambda config, key: key == "web")
     monkeypatch.setattr(ns, "_has_agent_browser", lambda: False)
-    monkeypatch.setattr(ns, "resolve_openai_audio_api_key", lambda: "")
     monkeypatch.setattr(ns, "has_direct_modal_credentials", lambda: False)
 
     features = ns.get_nous_subscription_features({"web": {"backend": "exa"}})
@@ -70,7 +69,6 @@ def _stub_browser_probes(monkeypatch, *, has_agent_browser, chromium, lightpanda
     )
     monkeypatch.setattr(ns, "_toolset_enabled", lambda config, key: key == "browser")
     monkeypatch.setattr(ns, "_has_agent_browser", lambda: has_agent_browser)
-    monkeypatch.setattr(ns, "resolve_openai_audio_api_key", lambda: "")
     monkeypatch.setattr(ns, "has_direct_modal_credentials", lambda: False)
     monkeypatch.setattr(ns, "is_managed_tool_gateway_ready", lambda vendor: False)
     monkeypatch.setattr("tools.browser_tool._chromium_installed", lambda: chromium)

@@ -31,7 +31,6 @@ from plugins.teams_pipeline.models import (
     TeamsMeetingSummaryPayload,
 )
 from plugins.teams_pipeline.store import TeamsPipelineStore
-from tools.transcription_tools import transcribe_audio
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +40,6 @@ ACTIVE_PIPELINE_STATES = {
     "resolving_meeting",
     "fetching_transcript",
     "downloading_recording",
-    "transcribing_audio",
     "summarizing",
     "writing_notion",
     "writing_linear",
@@ -65,7 +63,6 @@ class TeamsPipelineArtifactNotFoundError(TeamsPipelineRetryableError):
     """Raised when meeting artifacts are not yet available."""
 
 
-TranscribeFn = Callable[[str, Optional[str]], dict[str, Any]]
 SummarizeFn = Callable[..., Awaitable[dict[str, Any] | TeamsMeetingSummaryPayload]]
 SinkFn = Callable[
     [TeamsMeetingSummaryPayload, dict[str, Any], Optional[dict[str, Any]]],
@@ -77,8 +74,6 @@ SinkFn = Callable[
 class TeamsPipelineConfig:
     transcript_preferred: bool = True
     transcript_required: bool = False
-    transcription_fallback: bool = True
-    stt_model: str | None = None
     ffmpeg_extract_audio: bool = True
     transcript_min_chars: int = 80
     tmp_dir: Path | None = None
@@ -93,8 +88,6 @@ class TeamsPipelineConfig:
         return cls(
             transcript_preferred=bool(data.get("transcript_preferred", True)),
             transcript_required=bool(data.get("transcript_required", False)),
-            transcription_fallback=bool(data.get("transcription_fallback", True)),
-            stt_model=data.get("stt_model") or data.get("sttModel"),
             ffmpeg_extract_audio=bool(data.get("ffmpeg_extract_audio", True)),
             transcript_min_chars=int(data.get("transcript_min_chars", 80)),
             tmp_dir=Path(tmp_dir) if tmp_dir else None,
@@ -275,7 +268,6 @@ class TeamsMeetingPipeline:
         graph_client: Any,
         store: TeamsPipelineStore,
         config: TeamsPipelineConfig | dict[str, Any] | None = None,
-        transcribe_fn: TranscribeFn = transcribe_audio,
         summarize_fn: Optional[SummarizeFn] = None,
         notion_writer: Optional[NotionWriter] = None,
         linear_writer: Optional[LinearWriter] = None,
@@ -284,7 +276,6 @@ class TeamsMeetingPipeline:
         self.graph_client = graph_client
         self.store = store
         self.config = config if isinstance(config, TeamsPipelineConfig) else TeamsPipelineConfig.from_dict(config)
-        self.transcribe_fn = transcribe_fn
         self.summarize_fn = summarize_fn or self._generate_summary_payload
         self.notion_writer = notion_writer
         self.linear_writer = linear_writer
@@ -365,21 +356,7 @@ class TeamsMeetingPipeline:
                     raise TeamsPipelineRetryableError(
                         f"Transcript unavailable for meeting {resolved_meeting.meeting_id}."
                     )
-                if not self.config.transcription_fallback:
-                    raise TeamsPipelineArtifactNotFoundError(
-                        "No transcript available and transcription fallback disabled "
-                        f"for {resolved_meeting.meeting_id}."
-                    )
-                job = self._persist_job(job, status="downloading_recording")
-                recordings = await list_recording_artifacts(self.graph_client, resolved_meeting)
-                if not recordings:
-                    raise TeamsPipelineRetryableError(
-                        f"Recording unavailable for meeting {resolved_meeting.meeting_id}."
-                    )
-                recording = recordings[0]
-                artifacts.append(recording)
-                transcript_text = await self._transcribe_recording(job, resolved_meeting, recording)
-                job = self._persist_job(job, selected_artifact_strategy="recording_stt_fallback")
+                transcript_text = ""
             else:
                 job = self._persist_job(job, selected_artifact_strategy="transcript_first")
 
@@ -447,68 +424,6 @@ class TeamsMeetingPipeline:
         stored = self.store.upsert_job(job.job_id, payload)
         return TeamsMeetingPipelineJob.from_dict(stored)
 
-    async def _transcribe_recording(
-        self,
-        job: TeamsMeetingPipelineJob,
-        meeting_ref: TeamsMeetingRef,
-        recording: MeetingArtifact,
-    ) -> str:
-        temp_root = self.config.tmp_dir or (get_hermes_home() / "tmp" / "teams_pipeline")
-        temp_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=str(temp_root), prefix="teams-recording-") as tmp_dir:
-            # display_name comes from Graph API and is ultimately set by
-            # the meeting organizer — strip any directory components so a
-            # crafted name like "../../etc/cron.d/evil" can't escape tmp_dir.
-            # Path(...).name reduces "." / ".." / "" to themselves, so the
-            # dot-only basenames must be rejected explicitly (joining "tmp/.."
-            # resolves to the parent dir); fall back to the artifact id.
-            fallback_name = f"{recording.artifact_id}.mp4"
-            raw_name = recording.display_name or fallback_name
-            recording_name = Path(raw_name).name
-            if recording_name in ("", ".", ".."):
-                recording_name = fallback_name
-            recording_path = Path(tmp_dir) / recording_name
-            await download_recording_artifact(
-                self.graph_client,
-                meeting_ref,
-                recording,
-                recording_path,
-            )
-            audio_path = await self._prepare_audio_path(recording_path)
-            job = self._persist_job(job, status="transcribing_audio")
-            result = await asyncio.to_thread(self.transcribe_fn, str(audio_path), self.config.stt_model)
-            if not result.get("success"):
-                raise TeamsPipelineRetryableError(str(result.get("error") or "Unknown STT failure"))
-            transcript = str(result.get("transcript") or "").strip()
-            if not transcript:
-                raise TeamsPipelineRetryableError("STT returned an empty transcript.")
-            return transcript
-
-    async def _prepare_audio_path(self, recording_path: Path) -> Path:
-        if recording_path.suffix.lower() in {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac", ".webm"}:
-            return recording_path
-        if not self.config.ffmpeg_extract_audio:
-            return recording_path
-        ffmpeg = shutil.which("ffmpeg")
-        if not ffmpeg:
-            raise TeamsPipelineRetryableError(
-                "Recording fallback requires ffmpeg for audio extraction, but ffmpeg was not found."
-            )
-        audio_path = recording_path.with_suffix(".wav")
-        proc = await asyncio.create_subprocess_exec(
-            ffmpeg,
-            "-y",
-            "-i",
-            str(recording_path),
-            str(audio_path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            detail = stderr.decode("utf-8", errors="replace").strip()
-            raise TeamsPipelineRetryableError(f"ffmpeg audio extraction failed: {detail}")
-        return audio_path
 
     async def _generate_summary_payload(
         self,

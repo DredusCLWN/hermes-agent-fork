@@ -1,10 +1,7 @@
-"""Shared ffmpeg executable discovery for Discord voice paths.
+"""Shared ffmpeg executable discovery for Discord media paths.
 
-Discovery itself is owned by ``tools.transcription_tools`` (the same helper
-the STT pipeline uses — PATH plus common Homebrew/local prefixes); this module
-only layers the Discord-voice-specific extras on top: an explicit
-``FFMPEG_PATH`` override and a Windows winget fallback for installs that
-never touch PATH.
+Looks for an explicit ``FFMPEG_PATH`` override, then ``shutil.which("ffmpeg")``,
+then a common Windows winget fallback for installs that never touch PATH.
 """
 
 from __future__ import annotations
@@ -15,12 +12,8 @@ from pathlib import Path
 
 
 def _shared_find_ffmpeg():
-    """Delegate to the repo-wide ffmpeg discovery helper when importable."""
-    try:
-        from tools.transcription_tools import _find_ffmpeg_binary
-    except ImportError:  # standalone plugin import (tests / sandboxes)
-        return shutil.which("ffmpeg")
-    return _find_ffmpeg_binary()
+    """Return the first ffmpeg binary found on PATH, if any."""
+    return shutil.which("ffmpeg")
 
 
 def resolve_ffmpeg_executable() -> str:

@@ -1437,7 +1437,7 @@ def _collect_auto_append_media_tags(
     messages: List[Dict[str, Any]],
     history_offset: int = 0,
     history_media_paths: Optional[set] = None,
-) -> tuple[List[str], bool]:
+) -> List[str]:
     """Collect real media tags from current-turn producer-tool results only.
 
     Two layered guards keep stale/example MEDIA: strings out of the reply:
@@ -1476,7 +1476,6 @@ def _collect_auto_append_media_tags(
                 tool_name_by_call_id[str(call_id)] = name
 
     media_tags: List[str] = []
-    has_voice_directive = False
     for msg in new_messages:
         if msg.get("role") not in ("tool", "function"):
             continue
@@ -1508,10 +1507,7 @@ def _collect_auto_append_media_tags(
             path = match.group(1).strip().rstrip('",}')
             if path and path not in history_media_paths:
                 media_tags.append(f"MEDIA:{path}")
-        if "[[audio_as_voice]]" in content:
-            has_voice_directive = True
-
-    return media_tags, has_voice_directive
+    return media_tags
 
 
 def _collect_history_media_paths(agent_history: List[Dict[str, Any]]) -> set:
@@ -2552,16 +2548,6 @@ def _event_media_is_audio(event, index: int) -> bool:
     return getattr(event, "message_type", None) in {MessageType.VOICE, MessageType.AUDIO}
 
 
-def _event_media_is_stt_input(event, index: int) -> bool:
-    """True when an audio attachment should enter the automatic STT pipeline."""
-    message_type = getattr(event, "message_type", None)
-    if message_type in {MessageType.AUDIO, MessageType.DOCUMENT}:
-        return False
-    return (
-        message_type == MessageType.VOICE
-        or _event_media_type_at(event, index).startswith("audio/")
-    )
-
 
 def _event_media_is_video(event, index: int) -> bool:
     """True if the attachment at *index* is video (per-attachment MIME first)."""
@@ -2620,64 +2606,12 @@ def _build_document_context_note(display_name: str, agent_path: str, mtype: str)
     )
 
 
-def _format_duration(seconds: float) -> str:
-    total = int(round(seconds))
-    if total < 0:
-        total = 0
-    hours, rem = divmod(total, 3600)
-    minutes, secs = divmod(rem, 60)
-    if hours:
-        return f"{hours}:{minutes:02d}:{secs:02d}"
-    return f"{minutes}:{secs:02d}"
-
-
-async def _probe_audio_duration(path: str) -> Optional[str]:
-    """Best-effort duration probe. Returns formatted MM:SS / HH:MM:SS, or None on failure."""
-    ext = os.path.splitext(path)[1].lower()
-
-    if ext == ".wav":
-        try:
-            def _wav_duration() -> float:
-                import wave
-                with wave.open(path, "rb") as wf:
-                    frames = wf.getnframes()
-                    rate = wf.getframerate() or 1
-                    return frames / float(rate)
-            secs = await asyncio.to_thread(_wav_duration)
-            return _format_duration(secs)
-        except Exception:
-            pass
-
-    if ext in (".ogg", ".opus", ".oga"):
-        try:
-            def _ogg_duration() -> float:
-                from mutagen.oggopus import OggOpus
-                return float(OggOpus(path).info.length)
-            secs = await asyncio.to_thread(_ogg_duration)
-            return _format_duration(secs)
-        except Exception:
-            pass
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", path,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-        if proc.returncode == 0:
-            return _format_duration(float(stdout.decode().strip()))
-    except Exception:
-        pass
-
-    return None
-
 
 def _dequeue_pending_event(adapter, session_key: str) -> MessageEvent | None:
     """Consume and return the full pending event for a session.
 
     Queued follow-ups must preserve their media metadata so they can re-enter
-    the normal image/STT/document preprocessing path instead of being reduced
+    the normal image/document preprocessing path instead of being reduced
     to a placeholder string.
     """
     return adapter.get_pending_message(session_key)
@@ -4143,27 +4077,6 @@ class TurnRunner:
                 logger.error("Progress message error: %s", e)
                 await asyncio.sleep(1)
 
-    def voice_ack_callback(self, call_id, tool_name, args):
-        """tool_start_callback: speak a one-time ack in the voice channel."""
-        ctx = self._ctx
-        if ctx._voice_ack_fired[0] or ctx._voice_ack_guild[0] is None:
-            return
-        if not ctx._run_still_current():
-            return
-        ctx._voice_ack_fired[0] = True
-        _adapter = self._runner.adapters.get(Platform.DISCORD)
-        if _adapter is None or not hasattr(_adapter, "play_ack_in_voice"):
-            return
-        try:
-            safe_schedule_threadsafe(
-                _adapter.play_ack_in_voice(ctx._voice_ack_guild[0]),
-                ctx._voice_ack_loop,
-                logger=logger,
-                log_message="voice ack scheduling error",
-            )
-        except Exception as _ack_err:
-            logger.debug("voice ack schedule failed: %s", _ack_err)
-
     def _step_callback_sync(self, iteration: int, prev_tools: list) -> None:
         ctx = self._ctx
         if not ctx._run_still_current():
@@ -4684,11 +4597,7 @@ class TurnRunner:
             )
             else None
         )
-        # Discord voice verbal-ack hook (fires once per turn on first tool
-        # call; armed only when in a voice channel with the mixer running).
-        agent.tool_start_callback = (
-            ctx.voice_ack_callback if ctx._voice_ack_guild[0] is not None else None
-        )
+        agent.tool_start_callback = None
         agent.step_callback = ctx._step_callback_sync if ctx._hooks_ref.loaded_hooks else None
         agent.stream_delta_callback = _stream_delta_cb
         agent.interim_assistant_callback = _interim_assistant_cb if _want_interim_messages else None
@@ -5452,7 +5361,7 @@ class TurnRunner:
         # context compression shrinks the message list below the original
         # history length, preserving the compression-safe behaviour of #160.
         if "MEDIA:" not in final_response:
-            media_tags, has_voice_directive = _collect_auto_append_media_tags(
+            media_tags = _collect_auto_append_media_tags(
                 result.get("messages", []),
                 history_offset=len(agent_history),
                 history_media_paths=_history_media_paths,
@@ -5465,8 +5374,6 @@ class TurnRunner:
                     if tag not in seen:
                         seen.add(tag)
                         unique_tags.append(tag)
-                if has_voice_directive:
-                    unique_tags.insert(0, "[[audio_as_voice]]")
                 final_response = final_response + "\n" + "\n".join(unique_tags)
 
         # Auto-generate session title after first exchange (non-blocking)
@@ -6042,13 +5949,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         from gateway.hooks import HookRegistry
         self.hooks = HookRegistry()
 
-        # Per-chat voice reply mode: "off" | "voice_only" | "all"
-        self._voice_mode: Dict[str, str] = self._load_voice_modes()
-        # Recent voice transcripts per (guild,user) for duplicate suppression.
-        # Protects against the same utterance being emitted twice by the voice
-        # capture / STT pipeline, which otherwise produces a second delayed reply.
-        self._recent_voice_transcripts: Dict[tuple[int, int], List[tuple[float, str]]] = {}
-
         # Track background tasks to prevent garbage collection mid-execution
         self._background_tasks: set = set()
 
@@ -6161,125 +6061,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return _find_skill("hermes-agent-setup") is not None
         except Exception:
             return False
-
-    # -- Voice mode persistence ------------------------------------------
-
-    _VOICE_MODE_PATH = _hermes_home / "gateway_voice_mode.json"
-
-    def _voice_key(self, platform: Platform, chat_id: str) -> str:
-        """Return a platform-namespaced key for voice mode state."""
-        return f"{platform.value}:{chat_id}"
-
-    def _load_voice_modes(self) -> Dict[str, str]:
-        try:
-            data = json.loads(self._VOICE_MODE_PATH.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            return {}
-
-        if not isinstance(data, dict):
-            return {}
-
-        valid_modes = {"off", "voice_only", "all"}
-        result = {}
-        for chat_id, mode in data.items():
-            if mode not in valid_modes:
-                continue
-            key = str(chat_id)
-            # Skip legacy unprefixed keys (warn and skip)
-            if ":" not in key:
-                logger.warning(
-                    "Skipping legacy unprefixed voice mode key %r during migration. "
-                    "Re-enable voice mode on that chat to rebuild the prefixed key.",
-                    key,
-                )
-                continue
-            result[key] = mode
-        return result
-
-    def _save_voice_modes(self) -> None:
-        try:
-            self._VOICE_MODE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            self._VOICE_MODE_PATH.write_text(
-                json.dumps(self._voice_mode, indent=2), encoding="utf-8"
-            )
-        except OSError as e:
-            logger.warning("Failed to save voice modes: %s", e)
-
-    def _set_adapter_auto_tts_disabled(self, adapter, chat_id: str, disabled: bool) -> None:
-        """Update an adapter's in-memory auto-TTS suppression set if present."""
-        disabled_chats = getattr(adapter, "_auto_tts_disabled_chats", None)
-        if not isinstance(disabled_chats, set):
-            return
-        if disabled:
-            disabled_chats.add(chat_id)
-            # ``/voice off`` also clears any explicit enable — it's a hard override.
-            enabled_chats = getattr(adapter, "_auto_tts_enabled_chats", None)
-            if isinstance(enabled_chats, set):
-                enabled_chats.discard(chat_id)
-        else:
-            disabled_chats.discard(chat_id)
-
-    def _set_adapter_auto_tts_enabled(self, adapter, chat_id: str, enabled: bool) -> None:
-        """Update an adapter's per-chat auto-TTS opt-in set if present.
-
-        Used for ``/voice on``/``/voice tts`` where the user explicitly wants
-        auto-TTS even when ``voice.auto_tts`` is False globally.
-        """
-        enabled_chats = getattr(adapter, "_auto_tts_enabled_chats", None)
-        if not isinstance(enabled_chats, set):
-            return
-        if enabled:
-            enabled_chats.add(chat_id)
-            # An explicit opt-in clears any stale /voice off for this chat.
-            disabled_chats = getattr(adapter, "_auto_tts_disabled_chats", None)
-            if isinstance(disabled_chats, set):
-                disabled_chats.discard(chat_id)
-        else:
-            enabled_chats.discard(chat_id)
-
-    def _sync_voice_mode_state_to_adapter(self, adapter) -> None:
-        """Restore persisted /voice state into a live platform adapter.
-
-        Populates three fields from config + ``self._voice_mode``:
-          - ``_auto_tts_default``: global default from ``voice.auto_tts``
-          - ``_auto_tts_enabled_chats``: chats with mode ``voice_only``/``all``
-          - ``_auto_tts_disabled_chats``: chats with mode ``off``
-        """
-        platform = getattr(adapter, "platform", None)
-        if not isinstance(platform, Platform):
-            return
-
-        disabled_chats = getattr(adapter, "_auto_tts_disabled_chats", None)
-        enabled_chats = getattr(adapter, "_auto_tts_enabled_chats", None)
-        if not isinstance(disabled_chats, set) and not isinstance(enabled_chats, set):
-            return
-
-        # Push the global voice.auto_tts default (config.yaml) onto the adapter.
-        # Lazy import to avoid adding a module-level dep from gateway → hermes_cli.
-        try:
-            from hermes_cli.config import load_config as _load_full_config
-            _full_cfg = _load_full_config()
-            _auto_tts_default = bool(
-                (_full_cfg.get("voice") or {}).get("auto_tts", False)
-            )
-        except Exception:
-            _auto_tts_default = False
-        if hasattr(adapter, "_auto_tts_default"):
-            adapter._auto_tts_default = _auto_tts_default
-
-        prefix = f"{platform.value}:"
-        if isinstance(disabled_chats, set):
-            disabled_chats.clear()
-            disabled_chats.update(
-                key[len(prefix):] for key, mode in self._voice_mode.items()
-                if mode == "off" and key.startswith(prefix)
-            )
-        if isinstance(enabled_chats, set):
-            enabled_chats.clear()
-            enabled_chats.update(
-                key[len(prefix):] for key, mode in self._voice_mode.items()
-                if mode in {"voice_only", "all"} and key.startswith(prefix)
-            )
 
     async def _await_adapter_cleanup_with_timeout(
         self, awaitable: Awaitable[Any], timeout: float
@@ -8497,41 +8278,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         self._enqueue_fifo(session_key, event, adapter)
 
     async def _prepare_busy_steer_text(self, event: MessageEvent) -> str:
-        """Return steerable text for a busy follow-up, transcribing voice first.
+        """Return steerable text for a busy follow-up.
 
-        Fresh and queued voice messages reach the normal inbound STT pipeline,
-        but successful steer messages intentionally bypass that queue. Without
-        preprocessing here, a media-only voice follow-up has an empty text
-        payload and steer mode silently degrades to queue mode.
-
-        Audio file attachments remain files; only voice-message media follows
-        the automatic STT contract used by ``_prepare_inbound_message_text``.
-        If transcription fails, preserve any caption and let the existing
-        steer fallback handle an otherwise empty event without losing it.
-
-        Routes through ``_transcribe_and_echo_pending_voice`` — the single
-        out-of-band transcription choke point shared with the interrupt
-        monitor and the pending-drain path — so the STT call is made at most
-        once per platform message (cached on the event) and the transcript
-        echo respects the count-based ledger.  If steering later falls back
-        to queue mode, the drain path reuses the cached transcript instead of
-        paying for a second STT call or re-echoing the same line.
+        Successful steer messages bypass the busy queue. Non-text media is
+        left for the normal media placeholder fallback.
         """
         text = (event.text or "").strip()
-        if not self._pending_event_audio_paths(event):
-            return text
-
-        adapter = self._adapter_for_source(event.source)
-        enriched_text, successful_transcripts = await self._transcribe_and_echo_pending_voice(
-            event,
-            adapter,
-            event.source,
-            text,
-            log_context="Busy-steer",
-        )
-        if not successful_transcripts:
-            return text
-        return (enriched_text or text).strip()
+        return text
 
     async def _handle_active_session_busy_message(self, event: MessageEvent, session_key: str) -> bool:
         # --- Authorization gate (#17775) ---
@@ -8722,23 +8475,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         redirected = False
         if effective_mode == "steer":
             steer_text = await self._prepare_busy_steer_text(event)
-            # A follow-up qualifies for steering when it is plain text, OR
-            # when every attachment is STT-eligible voice media whose
-            # transcript was just folded into steer_text — otherwise a voice
-            # note in steer mode silently degrades to queue mode (#58780).
-            _steer_media_urls = getattr(event, "media_urls", None) or []
-            _steer_all_voice = bool(_steer_media_urls) and (
-                len(self._pending_event_audio_paths(event)) == len(_steer_media_urls)
-            )
             can_steer = (
                 steer_text
                 and (
-                    (
-                        event.message_type == MessageType.TEXT
-                        and not event.media_urls
-                        and not event.media_types
-                    )
-                    or _steer_all_voice
+                    event.message_type == MessageType.TEXT
+                    and not event.media_urls
+                    and not event.media_types
                 )
                 and running_agent is not None
                 and running_agent is not _AGENT_PENDING_SENTINEL
@@ -8801,17 +8543,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             and running_agent is not _AGENT_PENDING_SENTINEL
         ):
             try:
-                _interrupt_text = event.text
+                _interrupt_text = event.text or ""
                 _media_urls = getattr(event, "media_urls", None) or []
-                if self._pending_event_audio_paths(event):
-                    _interrupt_text, _ = await self._transcribe_and_echo_pending_voice(
-                        event,
-                        adapter,
-                        event.source,
-                        event.text or "",
-                        log_context="Voice-busy-interrupt",
-                    )
-                elif not _interrupt_text and _media_urls:
+                if not _interrupt_text and _media_urls:
                     _interrupt_text = _build_media_placeholder(event)
                 running_agent.interrupt(_interrupt_text)
             except Exception:
@@ -14005,12 +13739,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:
             _pending_clarify = None
         if _pending_clarify is not None and _clarify_mod is not None:
-            _clarify_has_audio = bool(self._pending_event_audio_paths(event))
             _raw_clarify_reply = await self._prepare_clarify_reply_text(event)
-            if _clarify_has_audio and not _raw_clarify_reply:
+            if not _raw_clarify_reply:
                 logger.info(
-                    "Gateway retained pending clarify after voice transcription "
-                    "produced no usable text (session=%s, id=%s)",
+                    "Gateway retained pending clarify (session=%s, id=%s)",
                     _quick_key,
                     _pending_clarify.clarify_id,
                 )
@@ -14343,17 +14075,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         exc,
                     )
             logger.debug("PRIORITY interrupt for session %s", _quick_key)
-            _interrupt_text = event.text
+            _interrupt_text = event.text or ""
             _media_urls = getattr(event, "media_urls", None) or []
-            if self._pending_event_audio_paths(event):
-                _interrupt_text, _ = await self._transcribe_and_echo_pending_voice(
-                    event,
-                    self._adapter_for_source(source),
-                    source,
-                    event.text or "",
-                    log_context="Voice-priority-interrupt",
-                )
-            elif not _interrupt_text and _media_urls:
+            if not _interrupt_text and _media_urls:
                 _interrupt_text = _build_media_placeholder(event)
             running_agent.interrupt(_interrupt_text)
             # NOTE: self._pending_messages was write-only (never consumed).
@@ -14796,9 +14520,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if canonical == "subgoal":
             return await self._handle_subgoal_command(event)
 
-        if canonical == "voice":
-            return await self._handle_voice_command(event)
-
         if self._draining:
             return f"⏳ Gateway is {self._status_action_gerund()} and is not accepting new work right now."
 
@@ -15186,7 +14907,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         """Prepare inbound event text for the agent.
 
         Keep the normal inbound path and the queued follow-up path on the same
-        preprocessing pipeline so sender attribution, image enrichment, STT,
+        preprocessing pipeline so sender attribution, image enrichment,
         document notes, reply context, and @ references all behave the same.
 
         Side effect: buffers per-session native image paths when the active
@@ -15197,12 +14918,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         already run and images are represented in-text.
         """
         history = history or []
-        _pending_stt_prepared = hasattr(event, "_gateway_pending_stt_text")
-        message_text = (
-            getattr(event, "_gateway_pending_stt_text", None)
-            if _pending_stt_prepared
-            else event.text
-        ) or ""
+        message_text = getattr(event, "text", None) or ""
         _group_sessions_per_user = getattr(self.config, "group_sessions_per_user", True)
         _thread_sessions_per_user = getattr(self.config, "thread_sessions_per_user", False)
         # Prefer the already resolved session key from the caller so this write
@@ -15252,7 +14968,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         if event.media_urls:
             image_paths = []
-            audio_paths = []
             for i, path in enumerate(event.media_urls):
                 mtype = event.media_types[i] if i < len(event.media_types) else ""
                 # Classify images per-attachment: trust this attachment's own
@@ -15262,12 +14977,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 # mis-routed here as an image and the provider 400s.
                 if _event_media_is_image(event, i):
                     image_paths.append(path)
-                # MessageType.AUDIO = audio file attachment (e.g. .mp3, .m4a) — never STT
-                # MessageType.VOICE = voice message (Opus/OGG) — always STT
-                if event.message_type == MessageType.AUDIO:
+                if event.message_type in (MessageType.AUDIO, MessageType.VOICE):
                     audio_file_paths.append(path)
-                elif not _pending_stt_prepared and _event_media_is_stt_input(event, i):
-                    audio_paths.append(path)
                 if mtype.startswith("video/") or (not mtype and event.message_type == MessageType.VIDEO):
                     video_paths.append(path)
 
@@ -15574,18 +15285,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         )
 
     async def _prepare_clarify_reply_text(self, event) -> str:
-        """Return raw text or successful voice transcripts for a clarify reply."""
-        if not self._pending_event_audio_paths(event):
-            return (event.text or "").strip()
-
-        _, successful_transcripts = await self._transcribe_pending_audio_event_once(
-            event, "",
-        )
-        return "\n\n".join(
-            transcript.strip()
-            for transcript in successful_transcripts
-            if transcript.strip()
-        )
+        """Return raw text for a clarify reply."""
+        return (event.text or "").strip()
 
     def _consume_pending_native_image_paths(self, session_key: str) -> List[str]:
         state = self._peek_session_state(session_key)
@@ -16702,20 +16403,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 )
                 await self._deliver_platform_notice(source, notice)
         
-        # -----------------------------------------------------------------
-        # Voice channel awareness — deliver current voice channel state so
-        # the agent knows who is in the channel and who is speaking, without
-        # needing a separate tool call.  Delivered on the current user
-        # message and ONLY when it changed since the previous turn: the
-        # member/speaking serialization differs essentially every turn, and
-        # appending it to the ephemeral system prompt forced a full agent
-        # rebuild + prompt-cache re-key per message.  The system prompt
-        # carries a static pointer line instead (gateway/session.py).
-        # -----------------------------------------------------------------
-        _vc_note = self._voice_channel_sidecar_note(event, source, session_key)
-        if _vc_note:
-            turn_sidecar_notes.append(_vc_note)
-
         # -----------------------------------------------------------------
         # Auto-analyze images sent by the user
         #
@@ -18130,216 +17817,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return raw.guild.id
         return None
 
-
-    async def _handle_voice_channel_join(self, event: MessageEvent) -> str:
-        """Join the user's current Discord voice channel."""
-        adapter = self._adapter_for_source(event.source)
-        if not hasattr(adapter, "join_voice_channel"):
-            return "Voice channels are not supported on this platform."
-
-        guild_id = self._get_guild_id(event)
-        if not guild_id:
-            return "This command only works in a Discord server."
-
-        voice_channel = await adapter.get_user_voice_channel(
-            guild_id, event.source.user_id
-        )
-        if not voice_channel:
-            return "You need to be in a voice channel first."
-
-        # Wire callbacks BEFORE join so voice input arriving immediately
-        # after connection is not lost.
-        if hasattr(adapter, "_voice_input_callback"):
-            adapter._voice_input_callback = self._handle_voice_channel_input
-        if hasattr(adapter, "_on_voice_disconnect"):
-            adapter._on_voice_disconnect = self._handle_voice_timeout_cleanup
-        # Let the adapter's inactivity timer see the live voice-reply mode so it
-        # doesn't disconnect a deliberately text-only (/voice off) session.
-        if hasattr(adapter, "_voice_mode_getter"):
-            adapter._voice_mode_getter = lambda chat_id: self._voice_mode.get(
-                self._voice_key(Platform.DISCORD, str(chat_id)), "off"
-            )
-
-        try:
-            success = await adapter.join_voice_channel(voice_channel)
-        except Exception as e:
-            logger.warning("Failed to join voice channel: %s", e)
-            adapter._voice_input_callback = None
-            err_lower = str(e).lower()
-            if "pynacl" in err_lower or "nacl" in err_lower or "davey" in err_lower:
-                return (
-                    "Voice dependencies are missing (PyNaCl / davey). "
-                    f"Install with: `{sys.executable} -m pip install PyNaCl`"
-                )
-            return f"Failed to join voice channel: {e}"
-
-        if success:
-            adapter._voice_text_channels[guild_id] = int(event.source.chat_id)
-            if hasattr(adapter, "_voice_sources"):
-                adapter._voice_sources[guild_id] = event.source.to_dict()
-            self._voice_mode[self._voice_key(event.source.platform, event.source.chat_id)] = "all"
-            self._save_voice_modes()
-            self._set_adapter_auto_tts_enabled(adapter, event.source.chat_id, enabled=True)
-            return (
-                f"Joined voice channel **{voice_channel.name}**.\n"
-                f"I'll speak my replies and listen to you. Use /voice leave to disconnect."
-            )
-        # Join failed — clear callback
-        adapter._voice_input_callback = None
-        return "Failed to join voice channel. Check bot permissions (Connect + Speak)."
-
-    async def _handle_voice_channel_leave(self, event: MessageEvent) -> str:
-        """Leave the Discord voice channel."""
-        adapter = self._adapter_for_source(event.source)
-        guild_id = self._get_guild_id(event)
-
-        if not guild_id or not hasattr(adapter, "leave_voice_channel"):
-            return "Not in a voice channel."
-
-        if not hasattr(adapter, "is_in_voice_channel") or not adapter.is_in_voice_channel(guild_id):
-            return "Not in a voice channel."
-
-        try:
-            await adapter.leave_voice_channel(guild_id)
-        except Exception as e:
-            logger.warning("Error leaving voice channel: %s", e)
-        # Always clean up state even if leave raised an exception
-        self._voice_mode[self._voice_key(event.source.platform, event.source.chat_id)] = "off"
-        self._save_voice_modes()
-        self._set_adapter_auto_tts_disabled(adapter, event.source.chat_id, disabled=True)
-        if hasattr(adapter, "_voice_input_callback"):
-            adapter._voice_input_callback = None
-        return "Left voice channel."
-
-    def _handle_voice_timeout_cleanup(self, chat_id: str) -> None:
-        """Called by the adapter when a voice channel times out.
-
-        Cleans up runner-side voice_mode state that the adapter cannot reach.
-        """
-        self._voice_mode[self._voice_key(Platform.DISCORD, chat_id)] = "off"
-        self._save_voice_modes()
-        adapter = self.adapters.get(Platform.DISCORD)
-        self._set_adapter_auto_tts_disabled(adapter, chat_id, disabled=True)
-
-    def _is_duplicate_voice_transcript(self, guild_id: int, user_id: int, transcript: str) -> bool:
-        """Suppress repeated STT outputs for the same recent utterance.
-
-        Voice capture can occasionally emit the same utterance twice a few
-        seconds apart, which creates a second queued agent run and overlapping
-        spoken replies. Dedup exact and near-exact repeats per guild/user over a
-        short window while allowing genuinely new turns through.
-        """
-        from difflib import SequenceMatcher
-
-        normalized = re.sub(r"\s+", " ", transcript).strip().lower()
-        normalized = re.sub(r"[^\w\s]", "", normalized)
-        if not normalized:
-            return False
-
-        now = time.monotonic()
-        window_seconds = 12.0
-        key = (guild_id, user_id)
-        recent_store = getattr(self, "_recent_voice_transcripts", None)
-        if not isinstance(recent_store, dict):
-            recent_store = {}
-            self._recent_voice_transcripts = recent_store
-        recent = [
-            (ts, txt)
-            for ts, txt in recent_store.get(key, [])
-            if now - ts <= window_seconds
-        ]
-
-        for _, prior in recent:
-            if prior == normalized:
-                recent_store[key] = recent
-                return True
-            if len(prior) >= 16 and len(normalized) >= 16:
-                if SequenceMatcher(None, prior, normalized).ratio() >= 0.95:
-                    recent_store[key] = recent
-                    return True
-
-        recent.append((now, normalized))
-        recent_store[key] = recent[-5:]
-        return False
-
-    async def _handle_voice_channel_input(
-        self, guild_id: int, user_id: int, transcript: str
-    ):
-        """Handle transcribed voice from a user in a voice channel.
-
-        Creates a synthetic MessageEvent and processes it through the
-        adapter's full message pipeline (session, typing, agent, TTS reply).
-        """
-        adapter = self.adapters.get(Platform.DISCORD)
-        if not adapter:
-            return
-
-        text_ch_id = adapter._voice_text_channels.get(guild_id)
-        if not text_ch_id:
-            return
-
-        # Build source — reuse the linked text channel's metadata when available
-        # so voice input shares the same session as the bound text conversation.
-        source_data = getattr(adapter, "_voice_sources", {}).get(guild_id)
-        if source_data:
-            source = SessionSource.from_dict(source_data)
-            source.user_id = str(user_id)
-            source.user_name = str(user_id)
-        else:
-            source = SessionSource(
-                platform=Platform.DISCORD,
-                chat_id=str(text_ch_id),
-                user_id=str(user_id),
-                user_name=str(user_id),
-                chat_type="channel",
-            )
-
-        # Check authorization before processing voice input
-        if not self._is_user_authorized(source):
-            logger.debug("Unauthorized voice input from user %d, ignoring", user_id)
-            return
-
-        if self._is_duplicate_voice_transcript(guild_id, user_id, transcript):
-            logger.info(
-                "Suppressing duplicate voice transcript for guild=%s user=%s: %s",
-                guild_id,
-                user_id,
-                transcript[:100],
-            )
-            return
-
-        # Show transcript in text channel (after auth, with mention sanitization)
-        try:
-            channel = adapter._client.get_channel(text_ch_id)
-            if channel:
-                safe_text = transcript[:2000].replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
-                await channel.send(f"**[Voice]** <@{user_id}>: {safe_text}")
-        except Exception:
-            pass
-
-        # Build a synthetic MessageEvent and feed through the normal pipeline
-        # Use SimpleNamespace as raw_message so _get_guild_id() can extract
-        # guild_id and _send_voice_reply() plays audio in the voice channel.
-        from types import SimpleNamespace
-        # Resolve the bound text channel's channel_prompt so voice input gets
-        # the same per-channel context as typed messages (#50149).
-        channel_prompt: Optional[str] = None
-        resolver = getattr(adapter, "_resolve_channel_prompt", None)
-        if callable(resolver):
-            try:
-                resolved = resolver(str(text_ch_id))
-                channel_prompt = resolved if isinstance(resolved, str) else None
-            except Exception:
-                channel_prompt = None
-        event = MessageEvent(
-            source=source,
-            text=transcript,
-            message_type=MessageType.VOICE,
-            raw_message=SimpleNamespace(guild_id=guild_id, guild=None),
-            channel_prompt=channel_prompt,
-        )
-
-        await adapter.handle_message(event)
 
     async def _deliver_media_from_response(
         self,
@@ -20545,270 +20022,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             return prefix
         return user_text
 
-    async def _enrich_message_with_transcription(
-        self,
-        user_text: str,
-        audio_paths: List[str],
-    ) -> tuple[str, List[str]]:
-        """
-        Auto-transcribe user voice/audio messages using the configured STT provider
-        and prepend the transcript to the message text.
-
-        Args:
-            user_text:   The user's original caption / message text.
-            audio_paths: List of local file paths to cached audio files.
-
-        Returns:
-            A tuple of ``(enriched_text, successful_transcripts)``:
-              - ``enriched_text``: the message string with transcription wrappers
-                prepended (same as before).
-              - ``successful_transcripts``: the raw transcript strings for audio
-                clips that were successfully transcribed, in input order. Empty
-                list if every clip failed or STT is disabled. Callers can use
-                this to echo transcripts back to the user before the agent loop.
-        """
-        seen = set()
-        audio_paths = [p for p in audio_paths if p not in seen and not seen.add(p)]
-        if not getattr(self.config, "stt_enabled", True):
-            notes = []
-            for path in audio_paths:
-                abs_path = os.path.abspath(path)
-                duration_str = await _probe_audio_duration(abs_path)
-                if duration_str:
-                    notes.append(
-                        f"[The user sent a voice message: {abs_path} (duration: {duration_str})]"
-                    )
-                else:
-                    notes.append(f"[The user sent a voice message: {abs_path}]")
-            if not notes:
-                return user_text, []
-            prefix = "\n\n".join(notes)
-            _placeholder = "(The user sent a message with no text content)"
-            if user_text and user_text.strip() == _placeholder:
-                return prefix, []
-            if user_text:
-                return f"{prefix}\n\n{user_text}", []
-            return prefix, []
-
-        try:
-            from tools.transcription_tools import (
-                transcribe_audio,
-                transcribe_audio_local_fallback,
-            )
-        except ModuleNotFoundError as e:
-            logger.error("Transcription module unavailable: %s", e)
-            unavailable_note = "[voice message could not be transcribed]"
-            _placeholder = "(The user sent a message with no text content)"
-            if user_text and user_text.strip() == _placeholder:
-                return unavailable_note, []
-            if user_text:
-                return f"{unavailable_note}\n\n{user_text}", []
-            return unavailable_note, []
-
-        enriched_parts = []
-        successful_transcripts: List[str] = []
-        for path in audio_paths:
-            try:
-                logger.debug("Transcribing user voice: %s", path)
-                result = await asyncio.to_thread(transcribe_audio, path)
-                if not result.get("success"):
-                    fallback = await asyncio.to_thread(
-                        transcribe_audio_local_fallback,
-                        path,
-                    )
-                    if fallback.get("success"):
-                        logger.info(
-                            "Configured STT failed for %s; recovered with local STT",
-                            path,
-                        )
-                        result = fallback
-                if result["success"]:
-                    transcript = result["transcript"]
-                    # Speech-to-text can return success=True with an empty or
-                    # whitespace-only transcript on silence, cut-off, or
-                    # inaudible audio. Emitting empty quotes ('""') makes the
-                    # agent reply to nothing and can loop, so that case gets a
-                    # clear sentinel note instead (#41603).
-                    if not (transcript or "").strip():
-                        enriched_parts.append(
-                            "[The user sent a voice message but it came through "
-                            "empty or inaudible — speech-to-text returned no "
-                            "words. Do not guess at the content; ask the user "
-                            "to resend or type it out.]"
-                        )
-                        continue
-                    successful_transcripts.append(transcript)
-                    # Pass the transcript through as a plain quoted line. The
-                    # earlier wording ("The user sent a voice message~ Here's
-                    # what they said: ...") read as a meta-instruction and made
-                    # the LLM volunteer commentary about voice mode rather than
-                    # reply to the content.
-                    enriched_parts.append(f'"{transcript}"')
-                else:
-                    error = result.get("error", "unknown error")
-                    # All failure branches: a single, minimal, neutral marker.
-                    # Do NOT mention "no STT provider configured", "setup
-                    # instructions", or the "hermes-agent-setup" skill, and do
-                    # NOT claim a direct message was sent — those phrases get
-                    # persisted in conversation history and poison every later
-                    # turn, so the model keeps volunteering STT-setup advice
-                    # even after transcription starts working. The cause is
-                    # logged for operator diagnosis but kept out of the
-                    # LLM-visible prompt.
-                    logger.info("Voice transcription failed for %s: %s", path, error)
-                    from tools.credential_files import to_agent_visible_cache_path
-
-                    agent_path = to_agent_visible_cache_path(os.path.abspath(path))
-                    enriched_parts.append(
-                        "[voice message could not be transcribed automatically; "
-                        f"the audio is available at: {agent_path}]"
-                    )
-            except Exception as e:
-                logger.error("Transcription error: %s", e)
-                from tools.credential_files import to_agent_visible_cache_path
-
-                agent_path = to_agent_visible_cache_path(os.path.abspath(path))
-                enriched_parts.append(
-                    "[voice message could not be transcribed automatically; "
-                    f"the audio is available at: {agent_path}]"
-                )
-
-        if enriched_parts:
-            prefix = "\n\n".join(enriched_parts)
-            # Strip the empty-content placeholder from the Discord adapter
-            # when we successfully transcribed the audio — it's redundant.
-            _placeholder = "(The user sent a message with no text content)"
-            if user_text and user_text.strip() == _placeholder:
-                return prefix, successful_transcripts
-            if user_text:
-                return f"{prefix}\n\n{user_text}", successful_transcripts
-            return prefix, successful_transcripts
-        return user_text, successful_transcripts
-
-    def _pending_event_audio_paths(self, event) -> List[str]:
-        """Return STT-eligible paths from a pending voice message."""
-        audio_paths: List[str] = []
-        media_urls = getattr(event, "media_urls", None) or []
-        for i, path in enumerate(media_urls):
-            if _event_media_is_stt_input(event, i):
-                audio_paths.append(path)
-        return audio_paths
-
-    async def _transcribe_pending_audio_event_once(
-        self,
-        event,
-        user_text: Optional[str] = None,
-    ) -> tuple[str | None, List[str]]:
-        """Transcribe a pending audio event once and cache the result on the event.
-
-        Voice follow-ups can be inspected first by the interrupt monitor and
-        later consumed by the pending-drain path.  Both need the same transcript,
-        but only one STT call and one transcript echo should happen for the
-        platform message.
-        """
-        if hasattr(event, "_gateway_pending_stt_text"):
-            cached_text = getattr(event, "_gateway_pending_stt_text")
-            cached_transcripts = getattr(event, "_gateway_pending_stt_transcripts", []) or []
-            return cached_text, list(cached_transcripts)
-
-        audio_paths = self._pending_event_audio_paths(event)
-        if not audio_paths:
-            return user_text if user_text is not None else (getattr(event, "text", None) or None), []
-
-        text = user_text if user_text is not None else (getattr(event, "text", "") or "")
-        enriched_text, successful_transcripts = await self._enrich_message_with_transcription(
-            text,
-            audio_paths,
-        )
-        setattr(event, "_gateway_pending_stt_text", enriched_text)
-        setattr(event, "_gateway_pending_stt_transcripts", list(successful_transcripts))
-        return enriched_text, successful_transcripts
-
-    async def _echo_pending_stt_transcripts_once(
-        self,
-        event,
-        adapter,
-        source,
-        transcripts: List[str],
-        *,
-        metadata=None,
-        log_context: str = "Transcript",
-    ) -> None:
-        """Echo pending-event STT transcripts to the chat at most once.
-
-        The already-echoed transcripts are tracked as a COUNT rather than a
-        single boolean.  ``merge_pending_message_event`` can append a second
-        voice note to an event whose first transcript was already echoed and
-        invalidates the transcription cache; the re-run transcription then
-        returns the earlier transcripts as a prefix of the new list, so
-        echoing only the unsent tail suppresses the repeat while still
-        surfacing the newly merged note.  A count rather than a set of seen
-        values because two separate notes that transcribe identically are two
-        distinct deliveries and both must be echoed.
-        """
-        if (
-            not transcripts
-            or not self._should_echo_stt_transcripts()
-            or adapter is None
-        ):
-            return
-        already_echoed = int(getattr(event, "_gateway_pending_stt_echoed", 0) or 0)
-        unsent = transcripts[already_echoed:]
-        setattr(event, "_gateway_pending_stt_echoed", already_echoed + len(unsent))
-        for tx in unsent:
-            try:
-                await adapter.send(
-                    source.chat_id,
-                    f'🎙️ "{tx}"',
-                    metadata=metadata,
-                )
-            except Exception as echo_exc:
-                logger.debug("%s echo failed (non-fatal): %s", log_context, echo_exc)
-
-    async def _transcribe_and_echo_pending_voice(
-        self,
-        event,
-        adapter,
-        source,
-        text: str,
-        *,
-        log_context: str,
-        metadata=_UNSET,
-    ) -> tuple[str, List[str]]:
-        """Transcribe a pending voice event and echo transcripts once.
-
-        Unified helper for all interrupt/monitor/backup/drain paths that need
-        to transcribe a pending voice event and echo the transcript to chat.
-        Returns ``(enriched_text, transcripts)`` so the caller can feed the
-        enriched text into ``agent.interrupt()`` or the pending-drain flow.
-
-        If the event has no STT-eligible media, returns ``(text, [])`` unchanged.
-        The caller is responsible for the ``_build_media_placeholder`` fallback
-        when ``text`` is empty and the event has non-audio media.
-        """
-        if not self._pending_event_audio_paths(event):
-            return text, []
-        try:
-            enriched_text, transcripts = await self._transcribe_pending_audio_event_once(
-                event,
-                text,
-            )
-            echo_meta = self._thread_metadata_for_source(
-                source,
-                self._reply_anchor_for_event(event),
-            ) if metadata is _UNSET else metadata
-            await self._echo_pending_stt_transcripts_once(
-                event,
-                adapter,
-                source,
-                transcripts,
-                metadata=echo_meta,
-                log_context=log_context,
-            )
-            return enriched_text or text, transcripts
-        except Exception as trans_exc:
-            logger.warning("%s transcription failed: %s", log_context, trans_exc)
-            return text, []
 
     def _build_process_event_source(self, evt: dict):
         """Resolve the canonical source for a synthetic background-process event.
@@ -22214,36 +21427,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         state.conversation.sidecar_notes = []
         return list(staged) if isinstance(staged, list) else []
 
-    def _voice_channel_sidecar_note(self, event, source: SessionSource, session_key: str) -> Optional[str]:
-        """Return a ``[Voice channel now: ...]`` note when VC state changed.
-
-        Compares the live Discord voice-channel context against the last
-        value delivered for this session and returns a note only on change
-        (including leaving the channel).  Unchanged state returns ``None`` so
-        the per-turn member/speaking serialization cannot churn the prompt.
-        """
-        if source.platform != Platform.DISCORD:
-            return None
-        adapter = self.adapters.get(Platform.DISCORD)
-        guild_id = self._get_guild_id(event)
-        if not (guild_id and adapter and hasattr(adapter, "get_voice_channel_context")):
-            return None
-        try:
-            vc_now = adapter.get_voice_channel_context(guild_id) or ""
-        except Exception:
-            logger.debug("voice-channel context read failed", exc_info=True)
-            return None
-        vc_prev = None
-        if session_key:
-            _vc_state = self._session_state(session_key)
-            vc_prev = _vc_state.conversation.vc_last
-            _vc_state.conversation.vc_last = vc_now
-        if vc_now == (vc_prev if vc_prev is not None else ""):
-            return None
-        if not vc_now:
-            return "[Voice channel now: not connected to a voice channel]"
-        return f"[Voice channel now: {vc_now}]"
-
     def _pinned_session_context_prompt(
         self, context, redact_pii: bool, session_key: Optional[str]
     ) -> str:
@@ -23431,30 +22614,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # repeated "💻 terminal" header and render back-to-back blocks.
         last_was_terminal_block = [False]
 
-        # ── Discord voice "verbal ack before tool calls" ────────────────
-        # When the bot is in a voice channel with the continuous mixer
-        # installed (discord.voice_fx.enabled), speak a short phrase ("let me
-        # look into that") over the ambient idle bed on the FIRST tool call of
-        # the turn.  Fires from tool_start_callback (independent of the
-        # tool-progress text gate), at most once per turn.  No-op on every
-        # other platform / when not in a voice channel.
-        _voice_ack_fired = [False]
-        _voice_ack_guild: List[Optional[int]] = [None]
-        if source.platform == Platform.DISCORD:
-            _va = self.adapters.get(Platform.DISCORD)
-            # source.chat_id is the linked text channel; resolve the guild whose
-            # voice connection is bound to it (mirrors DiscordAdapter.play_tts).
-            _vtc = getattr(_va, "_voice_text_channels", None)
-            if isinstance(_vtc, dict) and hasattr(_va, "voice_mixer_active"):
-                for _gid, _tc in _vtc.items():
-                    if str(_tc) == str(source.chat_id) and _va.voice_mixer_active(_gid):
-                        _voice_ack_guild[0] = _gid
-                        break
-        _voice_ack_loop = asyncio.get_running_loop()
-
-        # voice_ack_callback extracted to TurnRunner.voice_ack_callback
-        # (published onto turn_ctx after the runner is constructed below).
-
         # Auto-cleanup of temporary progress bubbles (Telegram + any adapter
         # that implements ``delete_message``). When enabled via
         # ``display.platforms.<platform>.cleanup_progress: true``, message IDs
@@ -23510,9 +22669,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             log_mode_enabled=log_mode_enabled,
             interim_assistant_messages_enabled=interim_assistant_messages_enabled,
             needs_progress_queue=needs_progress_queue,
-            _voice_ack_fired=_voice_ack_fired,
-            _voice_ack_guild=_voice_ack_guild,
-            _voice_ack_loop=_voice_ack_loop,
             history=history,
             context_prompt=context_prompt,
             channel_prompt=channel_prompt,
@@ -23529,8 +22685,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # Callback invoked by agent on tool lifecycle events — extracted to
         # TurnRunner.progress_callback (bound method, same signature).
         turn_ctx.progress_callback = turn_runner.progress_callback
-        turn_ctx.voice_ack_callback = turn_runner.voice_ack_callback
-        
         # Background task to send progress messages
         # Accumulates tool lines into a single message that gets edited.
         #
@@ -23812,23 +22966,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             pending_text = None
                             if _peek_event is not None:
                                 pending_text = _peek_event.text or ""
-                                # Transcribe audio media BEFORE signaling the
-                                # agent, so voice messages interrupt with the
-                                # real transcript instead of an empty string
-                                # (or file-path placeholder). Matches the UX
-                                # of fresh voice messages including the
-                                # optional 🎙️ echo back to the user.
                                 _media_urls = getattr(_peek_event, "media_urls", None) or []
-                                if self._pending_event_audio_paths(_peek_event):
-                                    pending_text, _ = await self._transcribe_and_echo_pending_voice(
-                                        _peek_event,
-                                        _adapter,
-                                        source,
-                                        pending_text,
-                                        log_context="Voice-interrupt",
-                                        metadata={"thread_id": source.thread_id} if source.thread_id else None,
-                                    )
-                                elif not pending_text and _media_urls:
+                                if not pending_text and _media_urls:
                                     pending_text = _build_media_placeholder(_peek_event)
                             logger.debug("Interrupt detected from adapter, signaling agent...")
                             agent.interrupt(pending_text)
@@ -24096,16 +23235,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             _bp_text = _bp_event.text if _bp_event else None
                             if _bp_event is not None:
                                 _bp_media_urls = getattr(_bp_event, "media_urls", None) or []
-                                if self._pending_event_audio_paths(_bp_event):
-                                    _bp_text, _ = await self._transcribe_and_echo_pending_voice(
-                                        _bp_event,
-                                        _backup_adapter,
-                                        source,
-                                        _bp_text or "",
-                                        log_context="Voice-backup-interrupt",
-                                        metadata={"thread_id": source.thread_id} if source.thread_id else None,
-                                    )
-                                elif not _bp_text and _bp_media_urls:
+                                if not _bp_text and _bp_media_urls:
                                     _bp_text = _build_media_placeholder(_bp_event)
                             logger.info(
                                 "Backup interrupt detected for session %s "
@@ -24194,16 +23324,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                             _bp_text = _bp_event.text if _bp_event else None
                             if _bp_event is not None:
                                 _bp_media_urls = getattr(_bp_event, "media_urls", None) or []
-                                if self._pending_event_audio_paths(_bp_event):
-                                    _bp_text, _ = await self._transcribe_and_echo_pending_voice(
-                                        _bp_event,
-                                        _backup_adapter,
-                                        source,
-                                        _bp_text or "",
-                                        log_context="Voice-backup-interrupt",
-                                        metadata={"thread_id": source.thread_id} if source.thread_id else None,
-                                    )
-                                elif not _bp_text and _bp_media_urls:
+                                if not _bp_text and _bp_media_urls:
                                     _bp_text = _build_media_placeholder(_bp_event)
                             logger.info(
                                 "Backup interrupt detected for session %s "
@@ -24341,27 +23462,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     else:
                         pending = interrupt_message
                 elif pending_event:
-                    # Transcribe audio media on the dequeued event BEFORE it is
-                    # handed back as the next user turn, so queued/interrupting
-                    # voice messages drain with the real transcript instead of
-                    # a file-path placeholder. When configured, echo each
-                    # transcript back to the user in the same 🎙️ format as
-                    # fresh voice messages.
                     _pending_text = pending_event.text or ""
-                    _media_urls = getattr(pending_event, "media_urls", None) or []
-                    if self._pending_event_audio_paths(pending_event):
-                        pending, _ = await self._transcribe_and_echo_pending_voice(
-                            pending_event,
-                            adapter,
-                            source,
-                            _pending_text,
-                            log_context="Voice-drain",
-                            metadata={"thread_id": source.thread_id} if source.thread_id else None,
-                        )
-                        if not pending:
-                            pending = _build_media_placeholder(pending_event)
-                    else:
-                        pending = _pending_text or _build_media_placeholder(pending_event)
+                    pending = _pending_text or _build_media_placeholder(pending_event)
                     if pending:
                         logger.debug("Processing queued message after agent completion: '%s...'", pending[:40])
 

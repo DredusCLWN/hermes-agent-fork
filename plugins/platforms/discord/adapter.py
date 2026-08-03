@@ -4454,39 +4454,8 @@ class DiscordAdapter(BasePlatformAdapter):
             logger.error("Voice listen loop error: %s", e, exc_info=True)
 
     async def _process_voice_input(self, guild_id: int, user_id: int, pcm_data: bytes):
-        """Convert PCM -> WAV -> STT -> callback."""
-        from tools.voice_mode import is_whisper_hallucination
-
-        tmp_f = tempfile.NamedTemporaryFile(suffix=".wav", prefix="vc_listen_", delete=False)
-        wav_path = tmp_f.name
-        tmp_f.close()
-        try:
-            await asyncio.to_thread(VoiceReceiver.pcm_to_wav, pcm_data, wav_path)
-
-            from tools.transcription_tools import transcribe_audio
-            result = await asyncio.to_thread(transcribe_audio, wav_path)
-
-            if not result.get("success"):
-                return
-            transcript = result.get("transcript", "").strip()
-            if not transcript or is_whisper_hallucination(transcript):
-                return
-
-            logger.info("Voice input from user %d: %s", user_id, transcript[:100])
-
-            if self._voice_input_callback:
-                await self._voice_input_callback(
-                    guild_id=guild_id,
-                    user_id=user_id,
-                    transcript=transcript,
-                )
-        except Exception as e:
-            logger.warning("Voice input processing failed: %s", e, exc_info=True)
-        finally:
-            try:
-                os.unlink(wav_path)
-            except OSError:
-                pass
+        """Voice input processing removed."""
+        return
 
     def _discord_channel_ids_allowed(self, channel_ids: set[str]) -> bool:
         """True when *channel_ids* intersect ``DISCORD_ALLOWED_CHANNELS``."""
