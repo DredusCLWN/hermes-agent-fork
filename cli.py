@@ -13612,18 +13612,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
         # Icon-only custom prompts should still remain visible in special states.
         return symbol, symbol
 
-    def _audio_level_bar(self) -> str:
-        """Return a visual audio level indicator based on current RMS."""
-        _LEVEL_BARS = " ▁▂▃▄▅▆▇"
-        rec = getattr(self, "_voice_recorder", None)
-        if rec is None:
-            return ""
-        rms = rec.current_rms
-        # Normalize RMS (0-32767) to 0-7 index, with log-ish scaling
-        # Typical speech RMS is 500-5000, we cap display at ~8000
-        level = min(rms, 8000) * 7 // 8000
-        return _LEVEL_BARS[level]
-
     def _get_tui_prompt_fragments(self):
         """Return the prompt_toolkit fragments for the current interactive state."""
         symbol, state_suffix = self._get_tui_prompt_symbols()
@@ -13639,11 +13627,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                 return [(style, f"{icon} {extra} {state_suffix}")]
             return [(style, f"{icon} {state_suffix}")]
 
-        if self._voice_recording:
-            bar = self._audio_level_bar()
-            return _state_fragment("class:voice-recording", "●", bar)
-        if self._voice_processing:
-            return _state_fragment("class:voice-processing", "◉")
         if self._sudo_state:
             return _state_fragment("class:sudo-prompt", "🔐")
         if self._secret_state:
@@ -13660,8 +13643,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             return _state_fragment("class:prompt-working", self._command_spinner_frame())
         if self._agent_running:
             return _state_fragment("class:prompt-working", "⚕")
-        if self._voice_mode:
-            return _state_fragment("class:voice-prompt", "🎤")
         return [("class:prompt", symbol)]
 
     def _get_tui_prompt_text(self) -> str:
@@ -15204,11 +15185,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                 return Transformation(fragments=ti.fragments)
 
         def _get_placeholder():
-            if cli_ref._voice_recording:
-                _label = cli_ref._voice_record_key_label()
-                return f"recording... {_label} to stop, Ctrl+C to cancel"
-            if cli_ref._voice_processing:
-                return "transcribing..."
             if cli_ref._sudo_state:
                 return "type password (hidden), Enter to submit · ESC to skip"
             if cli_ref._secret_state:
@@ -15227,9 +15203,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                 return f"{frame} {status}"
             if cli_ref._agent_running:
                 return "msg=interrupt · /queue · /bg · /steer · Ctrl+C cancel"
-            if cli_ref._voice_mode:
-                _label = cli_ref._voice_record_key_label()
-                return f"type or {_label} to record"
             # Advertise a parked draft so the stash can never be silently
             # forgotten — the composer itself tells you how to get it back.
             _stash_hint = ""
@@ -15906,12 +15879,6 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
             'approval-cmd': '#AAAAAA italic',
             'approval-choice': '#AAAAAA',
             'approval-selected': '#FFD700 bold',
-            # Voice mode
-            'voice-prompt': '#87CEEB',
-            'voice-recording': '#FF4444 bold',
-            'voice-processing': '#FFA500 italic',
-            'voice-status': 'bg:#1a1a2e #87CEEB',
-            'voice-status-recording': 'bg:#1a1a2e #FF4444 bold',
         }
         style = PTStyle.from_dict(self._build_tui_style_dict())
 
