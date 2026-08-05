@@ -380,8 +380,14 @@ export function ChatSidebar({
 
   // Recents by activity (last_active || started_at). User send stamps
   // last_active immediately; manual drag order still wins below.
+  // A deterministic tiebreaker (started_at, then id) prevents sessions with
+  // equal last_active from swapping positions when the underlying array
+  // reorders (e.g. upsertResolvedSession prepends a freshly fetched row).
   const sortedSessions = useMemo(
-    () => [...visibleSessions].sort((a, b) => sessionTime(b) - sessionTime(a)),
+    () =>
+      [...visibleSessions].sort(
+        (a, b) => sessionTime(b) - sessionTime(a) || (b.started_at ?? 0) - (a.started_at ?? 0) || (a.id > b.id ? -1 : 1)
+      ),
     [visibleSessions]
   )
 
