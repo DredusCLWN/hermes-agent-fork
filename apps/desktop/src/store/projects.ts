@@ -1,4 +1,4 @@
-import { atom } from 'nanostores'
+import { atom, computed } from 'nanostores'
 
 import {
   liveSessionProjectId,
@@ -25,7 +25,7 @@ import {
   workspaceCwdForNewSession
 } from '@/store/session'
 import { $focusedSessionState, $focusedStoredSessionId } from '@/store/session-states'
-import type { ProjectInfo, ProjectsPayload } from '@/types/hermes'
+import type { ProjectInfo, ProjectsPayload, SessionInfo } from '@/types/hermes'
 
 // First-class, per-profile Projects (named, multi-folder workspaces). State is
 // served by the live gateway's `projects.*` JSON-RPC methods, which wrap the
@@ -34,6 +34,45 @@ import type { ProjectInfo, ProjectsPayload } from '@/types/hermes'
 
 export const $projects = atom<ProjectInfo[]>([])
 export const $activeProjectId = atom<null | string>(null)
+
+/**
+ * The project the FOCUSED session belongs to, for sidebar highlight.
+ *
+ * `$activeProjectId` is a backend pointer updated only on `enterProject` /
+ * `setActiveProject` — it goes stale when the user clicks a session in a
+ * different project without entering it. This computed derives the highlight
+ * from the focused session's cwd (via `liveSessionProjectId`), so the correct
+ * project lights up on every session switch. Falls back to the backend
+ * pointer when no session is focused (draft / detached).
+ */
+export const $activeProjectIdForHighlight = computed(
+  [$activeProjectId, $focusedStoredSessionId, $sessions, $projects, $currentCwd],
+  (backendActive, focusedId, sessions, projects, currentCwd) => {
+    if (focusedId) {
+      const row = sessions.find(s => sessionMatchesStoredId(s, focusedId))
+
+      if (row) {
+        const projectId = liveSessionProjectId(row, projects)
+
+        if (projectId) {
+          return projectId
+        }
+      }
+    }
+
+    // No focused session or unplaceable: try the current cwd (draft workspace).
+    if (currentCwd) {
+      const pseudoRow = { cwd: currentCwd } as SessionInfo
+      const projectId = liveSessionProjectId(pseudoRow, projects)
+
+      if (projectId) {
+        return projectId
+      }
+    }
+
+    return backendActive
+  }
+)
 
 // The authoritative project -> repo -> lane tree (overview), served by
 // `projects.tree`. Lanes carry counts + structure; per-project session rows are

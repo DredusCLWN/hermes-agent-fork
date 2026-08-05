@@ -12,6 +12,7 @@ import {
   sessionMatchesStoredId,
   setCurrentBranch,
   setCurrentCwd,
+  setCurrentCwdTransient,
   setCurrentFastMode,
   setCurrentModel,
   setCurrentPersonality,
@@ -1056,7 +1057,9 @@ export function applyRuntimeInfo(
   return sessionState
 }
 
-export function applyStoredSessionPreviewRuntimeInfo(stored: { model?: null | string } | undefined) {
+export function applyStoredSessionPreviewRuntimeInfo(
+  stored: { cwd?: null | string; git_branch?: null | string; model?: null | string } | undefined
+) {
   setCurrentModel(stored?.model || '')
   setCurrentProvider('')
   setCurrentReasoningEffort('')
@@ -1064,6 +1067,19 @@ export function applyStoredSessionPreviewRuntimeInfo(stored: { model?: null | st
   setCurrentFastMode(false)
   setYoloActive(false)
   setCurrentPersonality('')
+
+  // Preview the session's workspace from the stored row so the file tree and
+  // coding rail update immediately, before session.resume RPC returns the
+  // authoritative runtime info. Without this, the tree stays on the previous
+  // session's cwd until applyRuntimeInfo lands (seconds on a cold backend).
+  const storedCwd = stored?.cwd?.trim() || ''
+
+  if (storedCwd && storedCwd !== $currentCwd.get().trim()) {
+    setCurrentCwdTransient(storedCwd)
+  }
+
+  const storedBranch = stored?.git_branch?.trim() || ''
+  setCurrentBranch(storedBranch)
 }
 
 // A "session genuinely doesn't exist" failure (deleted, or an id from a wiped /

@@ -65,7 +65,7 @@ import {
 } from '@/store/layout'
 import { $newChatProfile, $profiles, $profileScope, ALL_PROFILES, normalizeProfileKey } from '@/store/profile'
 import {
-  $activeProjectId,
+  $activeProjectIdForHighlight,
   $projects,
   $projectScope,
   $projectTree,
@@ -101,7 +101,6 @@ import { $focusedStoredSessionId, $workingSessionIds, type SplitDir } from '@/st
 import {
   type AppView,
   ARTIFACTS_ROUTE,
-  MESSAGING_ROUTE,
   SIDEBAR_NAV_AREA,
   type SidebarNavContribution,
   SKILLS_ROUTE
@@ -155,13 +154,6 @@ const SIDEBAR_NAV: SidebarNavItem[] = [
     icon: props => <Codicon name="symbol-misc" {...props} />,
     route: SKILLS_ROUTE,
     keybindActionId: 'nav.skills'
-  },
-  {
-    id: 'messaging',
-    label: '',
-    icon: props => <Codicon name="comment" {...props} />,
-    route: MESSAGING_ROUTE,
-    keybindActionId: 'nav.messaging'
   },
   {
     id: 'artifacts',
@@ -322,7 +314,7 @@ export function ChatSidebar({
   const projectTreeLoading = useStore($projectTreeLoading)
   const removedSessionIds = useStore($removedSessionIds)
   const reposScanning = useStore($reposScanning)
-  const activeProjectId = useStore($activeProjectId)
+  const activeProjectId = useStore($activeProjectIdForHighlight)
   const projectScope = useStore($projectScope)
   const currentCwd = useStore($currentCwd)
   const gatewayState = useStore($gatewayState)
@@ -409,14 +401,14 @@ export function ChatSidebar({
     for (const pinId of pinnedSessionIds) {
       const session = sessionByAnyId.get(pinId)
 
-      if (session && !seen.has(session.id)) {
+      if (session && !seen.has(session.id) && !removedSessionIds.has(session.id)) {
         seen.add(session.id)
         out.push(session)
       }
     }
 
     return out
-  }, [pinnedSessionIds, sessionByAnyId])
+  }, [pinnedSessionIds, sessionByAnyId, removedSessionIds])
 
   const pinnedRealIdSet = useMemo(() => new Set(pinnedSessions.map(s => s.id)), [pinnedSessions])
   const pinnedIdSet = useMemo(() => new Set(pinnedSessionIds), [pinnedSessionIds])
@@ -1132,7 +1124,6 @@ export function ChatSidebar({
 
                 const active =
                   (item.id === 'skills' && currentView === 'skills') ||
-                  (item.id === 'messaging' && currentView === 'messaging') ||
                   (item.id === 'artifacts' && currentView === 'artifacts') ||
                   // Contributed rows light up at their own route.
                   (Boolean(item.route) && pathname === item.route)
