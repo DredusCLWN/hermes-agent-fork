@@ -24,9 +24,15 @@ import {
 } from './api'
 
 export function GraphCanvas() {
-  // Live cwd from the active chat session — switches automatically
-  // when the user changes projects/chats in the sidebar.
-  const activeCwd = useValue(host.state.cwd)
+  // Live cwd from the focused chat session — switches automatically
+  // when the user changes projects/chats in the sidebar. Falls back to
+  // the global cwd for drafts/detached views.
+  const activeCwd = useValue(host.state.fileTreeCwd)
+  // Created projects (named, multi-folder workspaces) for the project selector.
+  const projects = useValue(host.state.projects)
+  // When the user picks a project from the selector, it overrides activeCwd.
+  const [selectedProjectCwd, setSelectedProjectCwd] = useState<string | null>(null)
+  const effectiveCwd = selectedProjectCwd ?? activeCwd
   const [nodes, setNodes] = useState<GraphNode[]>([])
   const [links, setLinks] = useState<GraphLink[]>([])
   const [selected, setSelected] = useState<GraphNode | null>(null)
@@ -93,21 +99,21 @@ export function GraphCanvas() {
   // triggers a fresh build for the new cwd.
   const lastBuiltCwd = useRef<string>('')
   useEffect(() => {
-    if (!modelsReady || !activeCwd) return
-    if (autoBuildTriggered.current && lastBuiltCwd.current === activeCwd) return
+    if (!modelsReady || !effectiveCwd) return
+    if (autoBuildTriggered.current && lastBuiltCwd.current === effectiveCwd) return
 
     autoBuildTriggered.current = true
-    lastBuiltCwd.current = activeCwd
+    lastBuiltCwd.current = effectiveCwd
 
     // Reset graph state for the new project
     setNodes([])
     setLinks([])
     setSelected(null)
 
-    const payload: Record<string, string> = { mode: 'ast', backend, cwd: activeCwd }
+    const payload: Record<string, string> = { mode: 'ast', backend, cwd: effectiveCwd }
     if (modelName) payload.model = modelName
     buildGraph(payload).catch(() => {})
-  }, [activeCwd, modelsReady, modelName, backend])
+  }, [effectiveCwd, modelsReady, modelName, backend])
 
   // Load graph when ready
   const loadGraph = useCallback(async () => {
@@ -650,6 +656,15 @@ export function GraphCanvas() {
           ) : (
             <GodNodesPanel nodes={nodes} links={links} />
           )}
+          <ProjectSelector
+            projects={projects}
+            activeCwd={activeCwd}
+            selectedProjectCwd={selectedProjectCwd}
+            onSelect={(cwd) => {
+              setSelectedProjectCwd(cwd)
+              autoBuildTriggered.current = false
+            }}
+          />
         </div>
       </div>
 
@@ -759,6 +774,77 @@ function GodNodesPanel({ nodes, links }: { nodes: GraphNode[]; links: GraphLink[
         {sorted.length === 0 && (
           <div style={{ color: 'var(--ui-text-tertiary)' }}>No nodes yet</div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// -- Project selector --------------------------------------------------------
+
+interface ProjectSelectorProps {
+  projects: { id: string; name: string; primary_path: null | string; folders: { path: string }[]; archived?: boolean }[]
+  activeCwd: string
+  selectedProjectCwd: null | string
+  onSelect: (cwd: string) => void
+}
+
+function ProjectSelector({ projects, activeCwd, selectedProjectCwd, onSelect }: ProjectSelectorProps) {
+  const activeCwdTrim = activeCwd.trim().toLowerCase()
+
+  const entries = useMemo(() => {
+    return projects
+      .filter(p => !p.archived)
+      .map(p => {
+        const cwd = (p.primary_path ?? p.folders[0]?.path ?? '').trim()
+        const isActive = cwd.toLowerCase() === activeCwdTrim
+        const isSelected = cwd === selectedProjectCwd
+        return { id: p.id, name: p.name || p.id, cwd, isActive, isSelected }
+      })
+      .filter(e => e.cwd)
+  }, [projects, activeCwdTrim, selectedProjectCwd])
+
+  if (entries.length === 0) return null
+
+  return (
+    <div
+    className="mt-2 rounded-lg"
+    style={{ border: '1px solid var(--ui-stroke-secondary)', background: 'var(--ui-bg-editor)' }}
+  >
+      <div
+        className="px-3 py-2"
+        style={{ borderBottom: '1px solid var(--ui-stroke-secondary)' }}
+      >
+        <span className="text-sm font-semibold">Projects</span>
+      </div>
+      <div className="space-y-1 p-2 text-xs">
+        {entries.map(e => (
+          <div
+            key={e.id}
+            className="flex cursor-pointer items-center gap-2 rounded px-2 py-1"
+            style={{
+              background: e.isSelected
+                ? 'var(--ui-accent-soft, color-mix(in srgb, var(--ui-accent) 12%, transparent))'
+                : e.isActive
+                  ? 'var(--ui-row-hover-background)'
+                  : 'transparent',
+              transition: 'background 0.1s',
+            }}
+            onMouseEnter={(ev) => {
+              if (!e.isSelected && !e.isActive) ev.currentTarget.style.background = 'var(--ui-row-hover-background)'
+            }}
+            onMouseLeave={(ev) => {
+              if (!e.isSelected && !e.isActive) ev.currentTarget.style.background = 'transparent'
+            }}
+            onClick={() => onSelect(e.cwd)}
+          >
+            <span className="truncate" style={{ color: e.isSelected ? 'var(--ui-accent)' : 'var(--ui-text-primary)' }}>
+              {e.name}
+            </span>
+            {e.isActive && !e.isSelected && (
+              <span className="ml-auto shrink-0" style={{ color: 'var(--ui-text-quaternary)' }}>chat</span>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   )

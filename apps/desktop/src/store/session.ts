@@ -289,15 +289,49 @@ export function mergeSessionPage(
   // root so a mid-turn refresh can't drop a touchSessionActivity bump.
   const prevByLineage = new Map(previous.map(session => [session._lineage_root_id ?? session.id, session]))
 
-  const merged = incoming.map(session => {
-    const prev = prevById.get(session.id) ?? prevByLineage.get(session._lineage_root_id ?? session.id)
-    // User-send stamps last_active before the DB flushes the user row
-    // (last_active = MAX(messages.timestamp)). Keep the fresher of the two.
-    const last_active = Math.max(prev?.last_active ?? 0, session.last_active ?? 0)
-    const title = session.title?.trim() ? session.title : prev?.title?.trim() ? prev.title : session.title
+  // Build a lookup of incoming sessions by id and lineage root for O(1) match
+  const incomingById = new Map(incoming.map(s => [s.id, s]))
+  const incomingByLineage = new Map(
+    incoming.filter(s => s._lineage_root_id).map(s => [s._lineage_root_id, s])
+  )
+  const incomingUsed = new Set<string>()
 
-    return last_active === session.last_active && title === session.title ? session : { ...session, last_active, title }
+  // Preserve the PREVIOUS order: map over previous and replace each row with
+  // its incoming match (updating fields like cwd, title, ended_at). This
+  // prevents the backend's last_active DESC sort from reordering sessions
+  // when last_activity_at was bumped during a prior turn but the frontend
+  // hasn't seen the update yet — the sidebar order stays stable across
+  // refreshes, and only touchSessionActivity (user send) re-sorts.
+  const merged = previous.map(session => {
+    const inc = incomingById.get(session.id) ?? incomingByLineage.get(session._lineage_root_id ?? session.id)
+
+    if (!inc) {
+      // Session not in incoming page — keep it if it's in the keep set
+      return session
+    }
+
+    incomingUsed.add(inc.id)
+
+    // Keep the fresher last_active (user-send stamp wins over backend)
+    const last_active = Math.max(session.last_active ?? 0, inc.last_active ?? 0)
+    const title = inc.title?.trim() ? inc.title : session.title?.trim() ? session.title : inc.title
+
+    return last_active === inc.last_active && title === inc.title
+      ? inc
+      : { ...inc, last_active, title }
   })
+
+  // Append incoming sessions not in previous (new sessions, or sessions
+  // scrolled into view by "load more")
+  for (const inc of incoming) {
+    if (!incomingUsed.has(inc.id)) {
+      const prev = prevById.get(inc.id) ?? prevByLineage.get(inc._lineage_root_id ?? inc.id)
+      const last_active = Math.max(prev?.last_active ?? 0, inc.last_active ?? 0)
+      const title = inc.title?.trim() ? inc.title : prev?.title?.trim() ? prev.title : inc.title
+
+      merged.push(last_active === inc.last_active && title === inc.title ? inc : { ...inc, last_active, title })
+    }
+  }
 
   if (keep.size === 0) {
     return merged

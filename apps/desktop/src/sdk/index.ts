@@ -27,6 +27,9 @@ import { $gateway } from '@/store/gateway'
 import { notify, notifyError } from '@/store/notifications'
 import { $activeGatewayProfile } from '@/store/profile'
 import { $activeSessionId, $currentCwd, $currentModel, $gatewayState } from '@/store/session'
+import { $fileTreeCwd } from '@/store/session-states'
+import { $projects } from '@/store/projects'
+import type { ProjectInfo } from '@/types/hermes'
 import { runGatewayRestart } from '@/store/system-actions'
 
 // -- state: readonly views over the app's live atoms -------------------------
@@ -61,6 +64,10 @@ export const host = {
     activeSessionId: readonlyAtom<null | string>($activeSessionId),
     /** Active workspace cwd ('' when detached). */
     cwd: readonlyAtom<string>($currentCwd),
+    /** Cwd of the focused chat session (falls back to cwd for drafts). */
+    fileTreeCwd: readonlyAtom<string>($fileTreeCwd),
+    /** Created projects (named, multi-folder workspaces). */
+    projects: readonlyAtom<ProjectInfo[]>($projects),
     /** Gateway socket state: 'idle' | 'connecting' | 'open' | …. */
     gateway: readonlyAtom<string>($gatewayState),
     /** Current main model slug. */
