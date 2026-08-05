@@ -34,8 +34,11 @@ import { readJson, writeJson } from '@/lib/storage'
 import { $activeGatewayProfile, normalizeProfileKey } from './profile'
 import {
   $activeSessionId,
+  $currentCwd,
   $selectedStoredSessionId,
+  $sessions,
   $unreadFinishedSessionIds,
+  sessionMatchesStoredId,
   setActiveSessionStoredIdRotation
 } from './session'
 import { isSecondaryWindow } from './windows'
@@ -762,6 +765,36 @@ export const $focusedRuntimeId = computed(
 /** The focused session's state slice (undefined while unresolved/unbound). */
 export const $focusedSessionState = computed([$focusedRuntimeId, $sessionStates], (runtimeId, states) =>
   runtimeId ? states[runtimeId] : undefined
+)
+
+/**
+ * The directory the right-sidebar file tree should show. Derived from the
+ * focused session (live runtime state first, then the stored row) so it
+ * switches instantly on session change. Falls back to `$currentCwd` for
+ * drafts, detached sessions, and non-chat views where no session is focused.
+ */
+export const $fileTreeCwd = computed(
+  [$focusedSessionState, $focusedStoredSessionId, $sessions, $currentCwd],
+  (focusedState, focusedId, sessions, currentCwd) => {
+    // Live runtime state is the freshest (agent can relocate mid-turn).
+    const liveCwd = focusedState?.cwd?.trim() || ''
+
+    if (liveCwd) {
+      return liveCwd
+    }
+
+    // Stored session row — available immediately on click, before resume RPC.
+    if (focusedId) {
+      const row = sessions.find(s => sessionMatchesStoredId(s, focusedId))
+      const rowCwd = row?.cwd?.trim() || ''
+
+      if (rowCwd) {
+        return rowCwd
+      }
+    }
+
+    return currentCwd.trim()
+  }
 )
 
 /** A PRIMARY navigation (sidebar resume, route change, new chat) homes focus to

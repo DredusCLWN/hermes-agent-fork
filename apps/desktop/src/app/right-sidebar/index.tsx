@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import { $panesFlipped } from '@/store/layout'
 import { notifyError } from '@/store/notifications'
 import { openPreview } from '@/store/preview'
-import { $currentCwd } from '@/store/session'
+import { $fileTreeCwd } from '@/store/session-states'
 
 import { SidebarPanelLabel } from '../shell/sidebar-label'
 
@@ -29,7 +29,7 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }: RightSide
   const { t } = useI18n()
   const r = t.rightSidebar
   const panesFlipped = useStore($panesFlipped)
-  const currentCwd = useStore($currentCwd).trim()
+  const currentCwd = useStore($fileTreeCwd).trim()
 
   // The file tree is simply "browse the session's working directory". If the
   // session has a cwd — a repo, a sibling worktree, or any folder — show it. A
