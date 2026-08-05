@@ -105,10 +105,10 @@ def test_resolve_platform_can_add_fields_only():
     }
     tg = resolve_footer_config(user, "telegram")
     assert tg["enabled"] is True
-    assert tg["fields"] == ["model", "context_pct", "cwd"]
+    assert tg["fields"] == ["model", "context_pct", "cwd", "token_savings"]
     dc = resolve_footer_config(user, "discord")
     assert dc["enabled"] is True
-    assert dc["fields"] == ["context_pct"]
+    assert dc["fields"] == ["context_pct", "token_savings"]
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +256,7 @@ def test_build_footer_line_threads_turn_seconds(monkeypatch):
 # ---------------------------------------------------------------------------
 
 _LEGACY_DEFAULT_FIELDS = ["model", "context_pct", "cwd"]
+_DEFAULT_FIELDS_WITH_SAVINGS = ["model", "context_pct", "cwd", "token_savings"]
 
 
 def test_latency_not_in_default_fields():
@@ -266,10 +267,12 @@ def test_latency_not_in_default_fields():
 
 
 def test_resolve_footer_config_default_fields_exclude_latency():
-    assert resolve_footer_config({}, "telegram")["fields"] == _LEGACY_DEFAULT_FIELDS
+    # resolve_footer_config auto-appends token_savings, so the resolved
+    # fields list is _DEFAULT_FIELDS + ["token_savings"].
+    assert resolve_footer_config({}, "telegram")["fields"] == _DEFAULT_FIELDS_WITH_SAVINGS
     assert resolve_footer_config(
         {"display": {"runtime_footer": {"enabled": True}}}, "discord"
-    )["fields"] == _LEGACY_DEFAULT_FIELDS
+    )["fields"] == _DEFAULT_FIELDS_WITH_SAVINGS
 
 
 @pytest.mark.parametrize(

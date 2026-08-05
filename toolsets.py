@@ -79,6 +79,10 @@ _HERMES_CORE_TOOLS = [
     "kanban_attach", "kanban_attach_url", "kanban_attachments",
     # Computer use (macOS, gated on cua-driver being installed via check_fn)
     "computer_use",
+    # Code graph — gated on graphify index existing via check_fn in
+    # tools/graph_tool.py. Only visible to the model when a graph has been
+    # built for the current cwd.
+    "graph_query",
 ]
 
 # Webhook events may originate from untrusted third-party content (for example,
@@ -177,6 +181,16 @@ TOOLSETS = {
             "user's cursor or keyboard focus. Works with any tool-capable model."
         ),
         "tools": ["computer_use"],
+        "includes": []
+    },
+
+    "graphify": {
+        "description": (
+            "Codebase dependency graph query — search components, trace "
+            "dependencies, explain node connections. Auto-built by the "
+            "graphify plugin; gated on index availability via check_fn."
+        ),
+        "tools": ["graph_query"],
         "includes": []
     },
 

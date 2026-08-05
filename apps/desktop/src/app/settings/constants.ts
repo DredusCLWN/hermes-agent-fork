@@ -4,7 +4,6 @@ import {
   type IconComponent,
   Lock,
   MessageCircle,
-  Mic,
   Monitor,
   Moon,
   Palette,
@@ -247,6 +246,10 @@ export const ENUM_OPTIONS: Record<string, string[]> = {
   'approvals.mode': ['manual', 'smart', 'off'],
   'code_execution.mode': ['project', 'strict'],
   'context.engine': ['compressor', 'default', 'custom'],
+  'display.response_style': ['caveman', ''],
+  'display.caveman_mode': ['auto', 'lite', 'full', 'ultra'],
+  'display.ponytail': ['ponytail', ''],
+  'display.ponytail_mode': ['lite', 'full', 'ultra'],
   // '' = inherit the agent's own effort; the rest is the shared scale.
   'delegation.reasoning_effort': ['', ...REASONING_EFFORTS],
   // NOTE: memory.provider is intentionally NOT listed here. Its options are
@@ -393,7 +396,11 @@ export const FIELD_LABELS: Record<string, string> = defineFieldCopy({
   timezone: 'Timezone',
   display: {
     personality: 'Personality',
-    showReasoning: 'Reasoning Blocks'
+    showReasoning: 'Reasoning Blocks',
+    responseStyle: 'Response Style',
+    cavemanMode: 'Caveman Mode',
+    ponytail: 'Ponytail',
+    ponytailMode: 'Ponytail Mode'
   },
   desktop: {
     repoScanEnabled: 'Automatic Repository Discovery',
@@ -559,7 +566,11 @@ export const FIELD_DESCRIPTIONS: Record<string, string> = defineFieldCopy({
   fallbackProviders: 'Backup provider:model entries to try if the default model fails.',
   display: {
     personality: 'Default assistant style for new sessions.',
-    showReasoning: 'Show reasoning sections when the backend provides them.'
+    showReasoning: 'Show reasoning sections when the backend provides them.',
+    responseStyle: 'Terse, compressed responses that cut filler while keeping technical accuracy. Set to "caveman" to enable, or empty to disable.',
+    cavemanMode: 'Auto = on from message one at full intensity. Lite = no filler, keep full sentences. Full = drop articles, fragments OK. Ultra = strip conjunctions, one word when one word enough. Switch anytime from chat: /caveman lite|full|ultra|off.',
+    ponytail: 'Lazy senior dev style — minimal code via YAGNI ladder (reuse → stdlib → native → one-liner). Set to "ponytail" to enable, or empty to disable.',
+    ponytailMode: 'Lite = build what\'s asked, name the lazier alternative. Full = the ladder enforced, stdlib and native first. Ultra = YAGNI extremist, deletion before addition. Switch anytime: /ponytail lite|full|ultra|off.'
   },
   desktop: {
     repoScanEnabled: 'Scan local folders for Git repositories to show in Projects.',
@@ -690,6 +701,10 @@ export const SECTIONS: DesktopConfigSection[] = [
     label: 'Memory & Context',
     icon: Brain,
     keys: [
+      'display.response_style',
+      'display.caveman_mode',
+      'display.ponytail',
+      'display.ponytail_mode',
       'memory.memory_enabled',
       'memory.user_profile_enabled',
       'memory.memory_char_limit',
@@ -700,54 +715,6 @@ export const SECTIONS: DesktopConfigSection[] = [
       'compression.threshold',
       'compression.target_ratio',
       'compression.protect_last_n'
-    ]
-  },
-  {
-    id: 'voice',
-    label: 'Voice',
-    icon: Mic,
-    keys: [
-      'tts.provider',
-      'stt.enabled',
-      'stt.echo_transcripts',
-      'stt.provider',
-      'voice.auto_tts',
-      'tts.edge.voice',
-      'tts.openai.model',
-      'tts.openai.voice',
-      'tts.elevenlabs.voice_id',
-      'tts.elevenlabs.model_id',
-      'tts.xai.voice_id',
-      'tts.xai.language',
-      'tts.xai.speed',
-      'tts.xai.auto_speech_tags',
-      'tts.xai.optimize_streaming_latency',
-      'tts.xai.sample_rate',
-      'tts.xai.bit_rate',
-      'tts.minimax.model',
-      'tts.minimax.voice_id',
-      'tts.mistral.model',
-      'tts.mistral.voice_id',
-      'tts.gemini.model',
-      'tts.gemini.voice',
-      'tts.neutts.model',
-      'tts.neutts.device',
-      'tts.kittentts.model',
-      'tts.kittentts.voice',
-      'tts.piper.voice',
-      'tts.deepinfra.model',
-      'tts.deepinfra.voice',
-      'stt.local.model',
-      'stt.local.language',
-      'stt.openai.model',
-      'stt.groq.model',
-      'stt.mistral.model',
-      'stt.elevenlabs.model_id',
-      'stt.elevenlabs.language_code',
-      'stt.elevenlabs.tag_audio_events',
-      'stt.elevenlabs.diarize',
-      'voice.record_key',
-      'voice.max_recording_seconds'
     ]
   },
   {

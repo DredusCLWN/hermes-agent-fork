@@ -12,10 +12,12 @@ Config (``~/.hermes/config.yaml``)::
         fields: [model, context_pct, cwd]   # order shown; drop any to hide
 
 Available fields:
-    model        — bare model id, vendor prefix dropped (``gpt-5.4``)
-    context_pct  — last-call context occupancy as a percent (``5%``)
-    latency      — wall-clock duration of the turn (``22s``, ``1m05s``)
-    cwd          — home-relative working dir (``~``)
+    model         — bare model id, vendor prefix dropped (``gpt-5.4``)
+    context_pct   — last-call context occupancy as a percent (``5%``)
+    latency       — wall-clock duration of the turn (``22s``, ``1m05s``)
+    cwd           — home-relative working dir (``~``)
+    token_savings — aggregated tokens saved by all optimization tools
+                   (``⚡ 12.4k saved: cache 8k · caveman 3.2k · ponytail 2k · compress 1.2k``)
 
 ``latency`` is opt-in: it is NOT in the default field set, so a footer whose
 ``fields`` are unset renders exactly as before.
@@ -38,7 +40,17 @@ import os
 from typing import Any, Iterable, Optional
 
 _DEFAULT_FIELDS: tuple[str, ...] = ("model", "context_pct", "cwd")
+_CAVEMAN_SAVINGS_PCT = 65  # measured by JuliusBrussee/caveman benchmarks
+_PONYTAIL_SAVINGS_PCT = 54  # measured by DietrichGebert/ponytail agentic benchmark
 _SEP = " · "
+
+def _fmt_tokens(n: int) -> str:
+    """Compact token count: 1.2k, 15.7k, 3M."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1000:
+        return f"{n / 1000:.1f}k"
+    return str(n)
 
 
 def _home_relative_cwd(cwd: str) -> str:
@@ -94,6 +106,13 @@ def resolve_footer_config(
                 if isinstance(plat_footer.get("fields"), list) and plat_footer["fields"]:
                     resolved["fields"] = [str(f) for f in plat_footer["fields"]]
 
+    # Auto-append token_savings when any optimization is active and user
+    # hasn't explicitly listed it. Shows aggregated savings without extra config.
+    # Always auto-append: prompt caching and compression are always on,
+    # so there are almost always savings to show.
+    if "token_savings" not in resolved["fields"]:
+        resolved["fields"].append("token_savings")
+
     return resolved
 
 
@@ -115,6 +134,12 @@ def format_runtime_footer(
     context_length: Optional[int],
     cwd: Optional[str] = None,
     turn_seconds: Optional[float] = None,
+    output_tokens: int = 0,
+    caveman_active: bool = False,
+    caveman_mode: str = "auto",
+    cache_read_tokens: int = 0,
+    compression_saved_tokens: int = 0,
+    ponytail_active: bool = False,
     fields: Iterable[str] = _DEFAULT_FIELDS,
 ) -> str:
     """Render the footer line, or return "" if no fields have data.
@@ -141,6 +166,40 @@ def format_runtime_footer(
             rel = _home_relative_cwd(cwd or os.environ.get("TERMINAL_CWD", ""))
             if rel:
                 parts.append(rel)
+        elif field == "token_savings":
+            # Aggregate savings from all optimization tools.
+            savings_parts: list[str] = []
+            total_saved = 0
+
+            # 1. Prompt caching — real data from API (cache_read_tokens).
+            #    These are input tokens that were cached and not re-billed
+            #    at full price. Count them as saved.
+            if cache_read_tokens > 0:
+                total_saved += cache_read_tokens
+                savings_parts.append(f"cache {_fmt_tokens(cache_read_tokens)}")
+
+            # 2. Caveman — estimated ~65% of output tokens.
+            if caveman_active and output_tokens > 0:
+                estimated_full = int(output_tokens / (1 - _CAVEMAN_SAVINGS_PCT / 100))
+                caveman_saved = estimated_full - output_tokens
+                total_saved += caveman_saved
+                mode_tag = f" ({caveman_mode})" if caveman_mode not in ("auto", "full") else ""
+                savings_parts.append(f"caveman{_mode_tag} {_fmt_tokens(caveman_saved)}")
+
+            # 3. Context compression — estimated tokens saved by compression.
+            if compression_saved_tokens > 0:
+                total_saved += compression_saved_tokens
+                savings_parts.append(f"compress {_fmt_tokens(compression_saved_tokens)}")
+
+            # 4. Ponytail — ~54% output token reduction (measured benchmark).
+            if ponytail_active and output_tokens > 0:
+                estimated_full = int(output_tokens / (1 - _PONYTAIL_SAVINGS_PCT / 100))
+                ponytail_saved = estimated_full - output_tokens
+                total_saved += ponytail_saved
+                savings_parts.append(f"ponytail {_fmt_tokens(ponytail_saved)}")
+
+            if total_saved > 0:
+                parts.append(f"\u26a1 {_fmt_tokens(total_saved)} saved: " + " · ".join(savings_parts))
         # Unknown field names are silently ignored.
 
     if not parts:
@@ -157,6 +216,12 @@ def build_footer_line(
     context_length: Optional[int],
     cwd: Optional[str] = None,
     turn_seconds: Optional[float] = None,
+    output_tokens: int = 0,
+    caveman_active: bool = False,
+    caveman_mode: str = "auto",
+    cache_read_tokens: int = 0,
+    compression_saved_tokens: int = 0,
+    ponytail_active: bool = False,
 ) -> str:
     """Top-level entry point used by gateway/run.py.
 
@@ -177,5 +242,11 @@ def build_footer_line(
         context_length=context_length,
         cwd=cwd,
         turn_seconds=turn_seconds,
+        output_tokens=output_tokens,
+        caveman_active=caveman_active,
+        caveman_mode=caveman_mode,
+        cache_read_tokens=cache_read_tokens,
+        compression_saved_tokens=compression_saved_tokens,
+        ponytail_active=ponytail_active,
         fields=cfg.get("fields") or _DEFAULT_FIELDS,
     )

@@ -430,6 +430,7 @@ from hermes_cli.subcommands.sync import build_sync_parser
 from hermes_cli.subcommands.proxy import build_proxy_parser
 from hermes_cli.subcommands.profile import build_profile_parser
 from hermes_cli.subcommands.model import build_model_parser
+from hermes_cli.subcommands.agent import build_agent_parser
 from hermes_cli.subcommands.setup import build_setup_parser
 
 from hermes_cli.subcommands.whatsapp import build_whatsapp_parser
@@ -2999,6 +3000,113 @@ def cmd_model(args):
         except Exception:
             pass
     select_provider_and_model(args=args)
+
+
+def cmd_agent(args):
+    """Manage agent presets — list, select, or show."""
+    action = getattr(args, "agent_action", None)
+    if action == "list":
+        _agent_list_presets()
+    elif action == "select":
+        _agent_select_preset(args.name)
+    elif action == "show":
+        _agent_show_preset(args.name)
+    else:
+        print("Usage: hermes agent <list|select|show> [name]")
+
+
+def _agent_list_presets():
+    """List available agent presets."""
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+    presets = DEFAULT_CONFIG.get("agent_presets", {})
+    active = ""
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config() or {}
+        active = str(cfg.get("active_preset", "") or "")
+    except Exception:
+        pass
+
+    print("\n  Agent presets:\n")
+    for name, preset in presets.items():
+        marker = " (active)" if name == active else ""
+        desc = preset.get("description", "") if isinstance(preset, dict) else ""
+        print(f"    {name}{marker}")
+        if desc:
+            print(f"      {desc}")
+    print()
+
+
+def _agent_select_preset(name: str):
+    """Apply an agent preset by deep-merging into config.yaml."""
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+    presets = DEFAULT_CONFIG.get("agent_presets", {})
+    if name not in presets:
+        print(f"  Unknown preset: {name}")
+        print(f"  Available: {', '.join(presets.keys())}")
+        return
+
+    preset = presets[name]
+    if not isinstance(preset, dict):
+        print(f"  Invalid preset definition: {name}")
+        return
+
+    try:
+        from hermes_cli.config import load_config, save_config
+        cfg = load_config() or {}
+
+        # Deep-merge preset values (user values win).
+        for key, value in preset.items():
+            if key in ("description",):
+                continue
+            if key not in cfg or cfg.get(key) is None:
+                cfg[key] = value
+            elif isinstance(cfg.get(key), dict) and isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    if sub_key not in cfg[key] or cfg[key].get(sub_key) is None:
+                        cfg[key][sub_key] = sub_value
+
+        cfg["active_preset"] = name
+        save_config(cfg)
+        print(f"  ✓ Preset '{name}' applied.")
+        print(f"    Start a new session for changes to take effect.")
+    except Exception as exc:
+        print(f"  Failed to apply preset: {exc}")
+
+
+def _agent_show_preset(name: str | None = None):
+    """Show details of a specific preset (or the active one)."""
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+    presets = DEFAULT_CONFIG.get("agent_presets", {})
+
+    if name is None:
+        try:
+            from hermes_cli.config import load_config
+            cfg = load_config() or {}
+            name = str(cfg.get("active_preset", "") or "")
+        except Exception:
+            name = ""
+        if not name:
+            print("  No active preset. Use `hermes agent show <name>`.")
+            return
+
+    if name not in presets:
+        print(f"  Unknown preset: {name}")
+        print(f"  Available: {', '.join(presets.keys())}")
+        return
+
+    preset = presets[name]
+    if not isinstance(preset, dict):
+        print(f"  Invalid preset definition: {name}")
+        return
+
+    print(f"\n  Preset: {name}")
+    print(f"  Description: {preset.get('description', '')}\n")
+    for key, value in preset.items():
+        if key == "description":
+            continue
+        print(f"    {key}: {value}")
+    print()
 
 
 def _is_profile_api_key_provider(provider_id: str) -> bool:
@@ -11123,6 +11231,11 @@ def main():
     # model command  (parser built in hermes_cli/subcommands/model.py)
     # =========================================================================
     build_model_parser(subparsers, cmd_model=cmd_model)
+
+    # =========================================================================
+    # agent command  (parser built in hermes_cli/subcommands/agent.py)
+    # =========================================================================
+    build_agent_parser(subparsers, cmd_agent=cmd_agent)
 
     from hermes_cli.moa_cmd import cmd_moa
 

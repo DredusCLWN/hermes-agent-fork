@@ -3,9 +3,7 @@ import { type FC, type ReactNode, useCallback, useRef, useState } from 'react'
 
 import { DirectiveContent } from '@/components/assistant-ui/directive-text'
 import { messageAttachmentRefs, messageContentText } from '@/components/assistant-ui/thread/content'
-import { ReactionBadge, ReactionPicker } from '@/components/assistant-ui/thread/message-reactions'
 import { type RestoreMessageTarget } from '@/components/assistant-ui/thread/types'
-import { useMessageReactions } from '@/components/assistant-ui/thread/use-message-reactions'
 import { UserMessageText } from '@/components/assistant-ui/thread/user-message-text'
 import { Codicon } from '@/components/ui/codicon'
 import { useResizeObserver } from '@/hooks/use-resize-observer'
@@ -153,17 +151,6 @@ export const UserMessage: FC<{
     return messageAttachmentRefs(custom.attachmentRefs)
   })
 
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const { enabled: reactionsEnabled, react, reactions: shownReactions } = useMessageReactions(messageId, 'user')
-
-  const pickEmoji = useCallback(
-    (emoji: null | string) => {
-      setPickerOpen(false)
-      react(emoji)
-    },
-    [react]
-  )
-
   // Sticky human bubbles clamp to ~2 lines with a soft fade so a long prompt
   // doesn't dominate the viewport while the response streams underneath; the
   // clamp lifts on hover / focus (see styles.css). We measure the *unclamped*
@@ -277,30 +264,22 @@ export const UserMessage: FC<{
       >
         <ActionBarPrimitive.Root className="relative w-full max-w-full" data-slot="aui_user-bubble-actions">
           <div className="human-message-with-todos-wrapper flex w-full flex-col gap-0">
-            <ReactionPicker
-              onOpenChange={setPickerOpen}
-              onSelect={pickEmoji}
-              open={pickerOpen}
-              selected={shownReactions.find(reaction => reaction.author === 'user')?.emoji}
-            >
-              <div
-                className="relative w-full"
-                onContextMenu={
-                  // Right-click is the desktop stand-in for iOS touch-and-hold —
-                  // but only when there's nothing selected. A live highlight
-                  // keeps the native Copy menu (and ⌘C) instead of the picker.
-                  readOnly || !reactionsEnabled
-                    ? undefined
-                    : event => {
-                        if (hasTextSelection()) {
-                          return
-                        }
-
-                        event.preventDefault()
-                        setPickerOpen(true)
+            <div
+              className="relative w-full"
+              onContextMenu={
+                // Right-click is the desktop stand-in for iOS touch-and-hold —
+                // but only when there's nothing selected. A live highlight
+                // keeps the native Copy menu (and ⌘C) instead of the picker.
+                readOnly
+                  ? undefined
+                  : event => {
+                      if (hasTextSelection()) {
+                        return
                       }
-                }
-              >
+
+                      event.preventDefault()
+                  }
+              }>
                 {readOnly ? (
                   // Spectator transcript: clicking only toggles the clamp so the
                   // full prompt is readable — never opens an edit composer.
@@ -397,15 +376,6 @@ export const UserMessage: FC<{
                   </div>
                 )}
               </div>
-            </ReactionPicker>
-            {/* Below the bubble, same register as the assistant action row:
-                same emoji size, same vertical padding, right-aligned to the
-                sent bubble. Overlaying the corner read badly in practice. */}
-            <ReactionBadge
-              className="justify-end gap-1.5 py-1.5 pr-1.5"
-              onRetract={() => react(null)}
-              reactions={shownReactions}
-            />
             <BranchPickerPrimitive.Root
               className={cn(
                 'checkpoint-container flex items-center gap-1 pb-0 pt-1 pl-1.5 text-[0.75rem] leading-none text-(--ui-text-tertiary)',

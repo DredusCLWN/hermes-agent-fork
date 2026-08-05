@@ -13,9 +13,10 @@ import type { HermesConfigRecord } from '@/types/hermes'
 // it pushes personality/cwd/voice/… into the session stores for live chat.
 export const HERMES_CONFIG_KEY = ['hermes-config-record'] as const
 
-// staleTime 0 → serve cache instantly, background-revalidate on every mount.
+// staleTime 30s → serve cache instantly, only background-revalidate if older
+// than 30s. Prevents refetch storm when switching settings tabs.
 export const useHermesConfigRecord = () =>
-  useQuery({ queryKey: HERMES_CONFIG_KEY, queryFn: getHermesConfigRecord, staleTime: 0 })
+  useQuery({ queryKey: HERMES_CONFIG_KEY, queryFn: getHermesConfigRecord, staleTime: 30_000, gcTime: Infinity })
 
 export const setHermesConfigCache = writeCache<HermesConfigRecord>(HERMES_CONFIG_KEY)
 

@@ -23,10 +23,11 @@ import { ColorSwatches } from '@/components/ui/color-swatches'
 import { CopyButton } from '@/components/ui/copy-button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { renameSession } from '@/hermes'
+import { getSessionMessages, renameSession } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { PROFILE_SWATCHES } from '@/lib/profile-color'
+import { formatChatLog, toChatMessages } from '@/lib/chat-messages'
 import { exportSession } from '@/lib/session-export'
 import { activeGateway } from '@/store/gateway'
 import { notify, notifyError } from '@/store/notifications'
@@ -355,6 +356,19 @@ function useSessionActions({
       />
       <kit.Separator />
       {workItems.map(item => renderActionItem(kit, item))}
+      <CopyButton
+        appearance={kit.copyAppearance}
+        disabled={!sessionId}
+        errorMessage={r.copyLogFailed}
+        iconClassName="size-3.5 text-current"
+        key={r.copyLog}
+        label={r.copyLog}
+        onCopyError={err => notifyError(err, r.copyLogFailed)}
+        text={async () => {
+          const { messages } = await getSessionMessages(sessionId, profile)
+          return formatChatLog(toChatMessages(messages))
+        }}
+      />
       {tabItems.length > 0 && (
         <>
           <kit.Separator />

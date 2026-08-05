@@ -2939,6 +2939,35 @@ def _platform_config_key(platform: "Platform") -> str:
     return "cli" if platform == Platform.LOCAL else platform.value
 
 
+def _estimate_compression_savings(agent) -> int:
+    """Estimate total tokens saved by context compression this session.
+
+    Uses the compressor's rough-token delta from the last compression
+    multiplied by compression_count as a lower-bound estimate. Falls back
+    to 0 when the compressor or its stats are unavailable.
+    """
+    try:
+        comp = getattr(agent, "context_compressor", None)
+        if comp is None:
+            return 0
+        count = getattr(comp, "compression_count", 0) or 0
+        if count == 0:
+            return 0
+        # last_compression_rough_tokens holds the rough estimate of the
+        # compressed region — use it as a per-compression savings proxy.
+        last_rough = getattr(comp, "last_compression_rough_tokens", 0) or 0
+        if last_rough > 0:
+            return int(last_rough * count)
+        # Fallback: if we have savings_pct, estimate from threshold.
+        savings_pct = getattr(comp, "_last_compression_savings_pct", 0) or 0
+        threshold = getattr(comp, "threshold_tokens", 0) or 0
+        if savings_pct > 0 and threshold > 0:
+            return int(threshold * (savings_pct / 100) * count)
+        return 0
+    except Exception:
+        return 0
+
+
 def _teams_pipeline_plugin_enabled() -> bool:
     """Return True when the standalone Teams pipeline plugin is enabled."""
     config = _load_gateway_config()
@@ -5386,6 +5415,7 @@ class TurnRunner:
                 "compacted_in_place": _compacted_in_place,
                 "session_id": effective_session_id,
                 "last_prompt_tokens": _last_prompt_toks,
+                "last_output_tokens": getattr(_agent.context_compressor, "last_completion_tokens", 0) if _agent and hasattr(_agent, "context_compressor") else 0,
                 "input_tokens": _input_toks,
                 "output_tokens": _output_toks,
                 "model": _resolved_model,
@@ -14764,6 +14794,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if canonical == "personality":
             return await self._handle_personality_command(event)
 
+        if canonical == "caveman":
+            return await self._handle_caveman_command(event)
+
+        if canonical == "ponytail":
+            return await self._handle_ponytail_command(event)
+
         if canonical == "kanban":
             return await self._handle_kanban_command(event)
 
@@ -17224,6 +17260,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     context_length=agent_result.get("context_length") or None,
                     cwd=os.environ.get("TERMINAL_CWD", ""),
                     turn_seconds=_turn_seconds,
+                    output_tokens=agent_result.get("last_output_tokens", 0) or 0,
+                    caveman_active=bool(getattr(_agent, "_response_style", "") and
+                                        getattr(_agent, "_response_style", "").lower() == "caveman"),
+                    caveman_mode=getattr(_agent, "_caveman_mode", "auto"),
+                    cache_read_tokens=getattr(_agent, "session_cache_read_tokens", 0) or 0,
+                    compression_saved_tokens=_estimate_compression_savings(_agent),
+                    ponytail_active=bool(getattr(_agent, "_ponytail", "") and
+                                         getattr(_agent, "_ponytail", "").lower() == "ponytail"),
                 )
             except Exception as _footer_err:
                 logger.debug("runtime_footer build failed: %s", _footer_err)

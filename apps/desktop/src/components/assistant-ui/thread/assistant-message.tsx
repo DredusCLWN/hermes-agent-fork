@@ -16,22 +16,22 @@ import {
   pickPrimaryPreviewTarget
 } from '@/components/assistant-ui/thread/content'
 import { MESSAGE_PARTS_COMPONENTS } from '@/components/assistant-ui/thread/message-parts'
-import { ReactionPicker } from '@/components/assistant-ui/thread/message-reactions'
 import { ResponseLoadingIndicator, StreamStallIndicator } from '@/components/assistant-ui/thread/status'
 import { formatMessageTimestamp } from '@/components/assistant-ui/thread/timestamp'
-import { useMessageReactions, useTapbackDoubleClick } from '@/components/assistant-ui/thread/use-message-reactions'
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
 import { PreviewAttachment } from '@/components/chat/preview-attachment'
+import { useSessionView } from '@/app/chat/session-view'
 import { Codicon } from '@/components/ui/codicon'
 import { CopyButton } from '@/components/ui/copy-button'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
-import { GitForkIcon, Loader2Icon, RefreshCwIcon, SmilePlusIcon, XIcon } from '@/lib/icons'
+import { GitForkIcon, Loader2Icon, RefreshCwIcon, XIcon, Zap } from '@/lib/icons'
 import { extractPreviewTargets } from '@/lib/preview-targets'
 import { formatAgo } from '@/lib/time'
 import { useEnterAnimation } from '@/lib/use-enter-animation'
 import { cn } from '@/lib/utils'
 import { notifyError } from '@/store/notifications'
+import type { UsageStats } from '@/types/hermes'
 
 // Stable empty identity for the settled-parts selector — a fresh [] per render
 // would re-derive the changed-files card on every message re-render.
@@ -110,17 +110,12 @@ export const AssistantMessage: FC<{
 
   const enterRef = useEnterAnimation(isRunning, `assistant-message:${messageId}`)
 
-  // Double-click the reply to heart it (iMessage). Undefined while reactions
-  // are off, so the root carries no listener at all.
-  const onDoubleClick = useTapbackDoubleClick(messageId, 'assistant')
-
   return (
     <MessagePrimitive.Root
       className="group flex w-full min-w-0 max-w-full flex-col gap-0 self-start overflow-hidden"
       data-role="assistant"
       data-slot="aui_assistant-message-root"
       data-streaming={isRunning ? 'true' : undefined}
-      onDoubleClick={onDoubleClick}
       ref={enterRef}
     >
       <div
@@ -166,23 +161,44 @@ export const AssistantMessage: FC<{
   )
 }
 
+function _fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
+}
+
+const TokenSavings: FC = () => {
+  const view = useSessionView()
+  const usage = useStore(view.$usage) as UsageStats | null
+  if (!usage?.savings || usage.savings <= 0) return null
+
+  const breakdown = usage.savings_breakdown ?? {}
+  const cache = breakdown.cache ?? 0
+  const caveman = breakdown.caveman ?? 0
+  const compression = breakdown.compression ?? 0
+  const ponytail = breakdown.ponytail ?? 0
+
+  return (
+    <div
+      className="flex shrink-0 items-center gap-1 py-1.5 pl-1 text-[0.6875rem] tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+      title={`Total saved: ${usage.savings.toLocaleString()} tokens`}
+    >
+      <Zap className="size-3 text-(--ui-warm)" />
+      <span>{_fmtTokens(usage.savings)} saved</span>
+      <span className="text-muted-foreground/60">
+        · cache {_fmtTokens(cache)} · caveman {_fmtTokens(caveman)} · ponytail {_fmtTokens(ponytail)} · compress {_fmtTokens(compression)}
+      </span>
+    </div>
+  )
+}
+
 const AssistantActionBar: FC<MessageActionProps> = ({ messageId, getMessageText, onBranchInNewChat }) => {
   const { t } = useI18n()
   const copy = t.assistant.thread
 
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const { enabled: reactionsEnabled, react, reactions: shownReactions } = useMessageReactions(messageId, 'assistant')
-
-  const pickEmoji = useCallback(
-    (emoji: null | string) => {
-      setPickerOpen(false)
-      react(emoji)
-    },
-    [react]
-  )
-
   return (
-    <div className="relative flex w-full shrink-0 items-center justify-end gap-1.5">
+    <div className="relative flex w-full shrink-0 items-center justify-between gap-1.5">
+      <TokenSavings />
       <ActionBarPrimitive.Root
         className={
           // NOTE: intentionally NOT `hideWhenRunning`. That prop unmounts the
@@ -215,42 +231,6 @@ const AssistantActionBar: FC<MessageActionProps> = ({ messageId, getMessageText,
           </TooltipIconButton>
         </ActionBarPrimitive.Reload>
       </ActionBarPrimitive.Root>
-      {/* ONE slot, Slack-style: the picker trigger and the landed reaction are
-          the same element, so reacting never shifts layout. Empty → ☺, hidden
-          until hover like its action-bar neighbors (state lives in styles.css
-          — the aui_msg-reactions rules outweigh Tailwind utilities here).
-          Reacted → the emoji itself, always visible at full strength, and
-          clicking it reopens the picker to switch or retract. Outside
-          ActionBarPrimitive.Root so a landed reaction doesn't ride the bar's
-          hover opacity. */}
-      {(reactionsEnabled || shownReactions.length > 0) && (
-        <ReactionPicker
-          onOpenChange={setPickerOpen}
-          onSelect={pickEmoji}
-          open={pickerOpen}
-          selected={shownReactions.find(reaction => reaction.author === 'user')?.emoji}
-        >
-          <TooltipIconButton
-            data-reacted={shownReactions.length > 0 || undefined}
-            data-slot="aui_msg-reactions"
-            data-state={pickerOpen ? 'open' : undefined}
-            onClick={reactionsEnabled ? () => setPickerOpen(open => !open) : undefined}
-            tooltip={copy.react}
-          >
-            {shownReactions.length > 0 ? (
-              <span className="flex items-center gap-0.5 text-[0.8125rem] leading-none">
-                {shownReactions.map(reaction => (
-                  <span className="reaction-pop" key={`${reaction.author}-${reaction.emoji}`}>
-                    {reaction.emoji}
-                  </span>
-                ))}
-              </span>
-            ) : (
-              <SmilePlusIcon className="size-3.5" />
-            )}
-          </TooltipIconButton>
-        </ReactionPicker>
-      )}
     </div>
   )
 }

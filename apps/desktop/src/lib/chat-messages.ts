@@ -171,6 +171,71 @@ export function chatMessageText(message: ChatMessage): string {
     .join('')
 }
 
+function formatToolCallPart(part: Extract<ChatMessagePart, { type: 'tool-call' }>): string {
+  const name = part.toolName ?? 'tool'
+  const argsText = part.argsText ?? (part.args ? JSON.stringify(part.args, null, 2) : '')
+
+  let text = `🔧 ${name}`
+
+  if (argsText) {
+    text += `\n${argsText}`
+  }
+
+  if (part.result !== undefined) {
+    const resultText = typeof part.result === 'string' ? part.result : JSON.stringify(part.result, null, 2)
+    const label = part.isError ? '❌ Error' : '✅ Result'
+    text += `\n${label}:\n${resultText}`
+  }
+
+  return text
+}
+
+export function formatChatLog(messages: ChatMessage[]): string {
+  const lines: string[] = []
+
+  for (const message of messages) {
+    if (message.hidden) continue
+
+    const role = message.role.toUpperCase()
+    const timestamp = message.timestamp ? new Date(message.timestamp).toISOString() : ''
+
+    lines.push(`--- ${role}${timestamp ? ` · ${timestamp}` : ''} ---`)
+
+    for (const part of message.parts) {
+      switch (part.type) {
+        case 'text':
+          lines.push(part.text)
+          break
+        case 'reasoning':
+          lines.push(`💭 Reasoning:\n${part.text}`)
+          break
+        case 'tool-call':
+          lines.push(formatToolCallPart(part))
+          break
+        case 'image':
+          lines.push('[image]')
+          break
+        case 'file':
+          lines.push(`[file: ${part.filename ?? 'unnamed'}]`)
+          break
+        case 'source':
+          lines.push(`[source: ${part.title ?? part.url}]`)
+          break
+        default:
+          break
+      }
+    }
+
+    if (message.error) {
+      lines.push(`❌ Error: ${message.error}`)
+    }
+
+    lines.push('')
+  }
+
+  return lines.join('\n').trim()
+}
+
 export interface UnspokenTurnSpeech {
   /** First unspoken assistant bubble — stable for the turn, the live speech session binds to it. */
   id: string

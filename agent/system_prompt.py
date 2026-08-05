@@ -37,6 +37,9 @@ from agent.prompt_builder import (
     KANBAN_GUIDANCE,
     MEMORY_GUIDANCE,
     OPENAI_MODEL_EXECUTION_GUIDANCE,
+    CAVEMAN_RESPONSE_STYLE,
+    get_caveman_prompt,
+    get_ponytail_prompt,
     PARALLEL_TOOL_CALL_GUIDANCE,
     PLATFORM_HINTS,
     SESSION_SEARCH_GUIDANCE,
@@ -222,6 +225,25 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # (default True) and only injected when tools are actually loaded.
     if getattr(agent, "_parallel_tool_call_guidance", True) and agent.valid_tool_names:
         stable_parts.append(PARALLEL_TOOL_CALL_GUIDANCE)
+
+    # Caveman response style — terse, structured output. Static per session
+    # so it's cache-safe. Gated by config.yaml ``display.response_style``
+    # (default "caveman"). Set to empty string or "off" to disable.
+    # Intensity level from ``display.caveman_mode``: lite/full/ultra/auto.
+    _response_style = getattr(agent, "_response_style", "")
+    if _response_style and _response_style.lower() not in ("off", "none", ""):
+        if _response_style.lower() == "caveman":
+            _caveman_mode = getattr(agent, "_caveman_mode", "auto")
+            stable_parts.append(get_caveman_prompt(_caveman_mode))
+
+    # Ponytail response style — lazy senior dev, minimal code. Static per
+    # session so it's cache-safe. Gated by config.yaml ``display.ponytail``
+    # (default "off"). Intensity from ``display.ponytail_mode``: lite/full/ultra.
+    _ponytail = getattr(agent, "_ponytail", "")
+    if _ponytail and _ponytail.lower() not in ("off", "none", ""):
+        if _ponytail.lower() == "ponytail":
+            _ponytail_mode = getattr(agent, "_ponytail_mode", "full")
+            stable_parts.append(get_ponytail_prompt(_ponytail_mode))
 
     # Tool-aware behavioral guidance: only inject when the tools are loaded
     tool_guidance = []

@@ -4868,6 +4868,52 @@ def _get_usage(agent) -> dict:
             usage["context_max"] = ctx_max
             usage["context_percent"] = max(0, min(100, round(last_prompt / ctx_max * 100)))
         usage["compressions"] = getattr(comp, "compression_count", 0) or 0
+    # Token savings from optimization tools (caching, caveman, compression).
+    _cache_read = g("session_cache_read_tokens")
+    if _cache_read:
+        usage["cache_read"] = _cache_read
+    _compression_saved = 0
+    if comp:
+        _count = getattr(comp, "compression_count", 0) or 0
+        if _count:
+            _last_rough = getattr(comp, "last_compression_rough_tokens", 0) or 0
+            if _last_rough:
+                _compression_saved = int(_last_rough * _count)
+            else:
+                _pct = getattr(comp, "_last_compression_savings_pct", 0) or 0
+                _threshold = getattr(comp, "threshold_tokens", 0) or 0
+                if _pct > 0 and _threshold > 0:
+                    _compression_saved = int(_threshold * (_pct / 100) * _count)
+    _caveman_active = bool(
+        getattr(agent, "_response_style", "") and
+        str(getattr(agent, "_response_style", "")).lower() == "caveman"
+    )
+    _caveman_saved = 0
+    if _caveman_active:
+        _last_output = getattr(comp, "last_completion_tokens", 0) or 0 if comp else 0
+        if _last_output > 0:
+            _estimated_full = int(_last_output / (1 - 0.65))
+            _caveman_saved = _estimated_full - _last_output
+    # Ponytail — ~54% output token reduction (measured benchmark).
+    _ponytail_active = bool(
+        getattr(agent, "_ponytail", "") and
+        str(getattr(agent, "_ponytail", "")).lower() == "ponytail"
+    )
+    _ponytail_saved = 0
+    if _ponytail_active:
+        _last_output = getattr(comp, "last_completion_tokens", 0) or 0 if comp else 0
+        if _last_output > 0:
+            _estimated_full = int(_last_output / (1 - 0.54))
+            _ponytail_saved = _estimated_full - _last_output
+    _total_savings = _cache_read + _caveman_saved + _compression_saved + _ponytail_saved
+    if _total_savings > 0:
+        usage["savings"] = _total_savings
+        usage["savings_breakdown"] = {
+            "cache": _cache_read,
+            "caveman": _caveman_saved,
+            "compression": _compression_saved,
+            "ponytail": _ponytail_saved,
+        }
     # Live count of background/async subagents still running (delegate_task
     # batches + background single delegations). Mirrors the classic CLI status
     # bar's ⛓ indicator; sourced from the same async_delegation registry.

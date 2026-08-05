@@ -16,14 +16,14 @@ describe('plugin locale registry', () => {
   it('resolves the active locale, falling back to English then the raw key', () => {
     const dispose = registerPluginLocales('cost', {
       en: { panel: { title: 'Cost' }, spent: (n: number) => `$${n} spent` },
-      ja: { panel: { title: 'コスト' } }
+      ru: { panel: { title: 'Стоимость' } }
     })
 
-    expect(translatePlugin('cost', 'ja', 'panel.title', [])).toBe('コスト')
-    // Missing in ja → English.
-    expect(translatePlugin('cost', 'ja', 'spent', [7])).toBe('$7 spent')
+    expect(translatePlugin('cost', 'ru', 'panel.title', [])).toBe('Стоимость')
+    // Missing in ru → English.
+    expect(translatePlugin('cost', 'ru', 'spent', [7])).toBe('$7 spent')
     // Missing everywhere → the key itself.
-    expect(translatePlugin('cost', 'ja', 'nope', [])).toBe('nope')
+    expect(translatePlugin('cost', 'ru', 'nope', [])).toBe('nope')
 
     dispose()
   })
@@ -43,11 +43,11 @@ describe('plugin locale registry', () => {
 
   it('merges repeated registrations and drops everything on dispose', () => {
     const one = registerPluginLocales('merge', { en: { a: 'A' } })
-    const two = registerPluginLocales('merge', { en: { b: 'B' }, ja: { a: 'あ' } })
+    const two = registerPluginLocales('merge', { en: { b: 'B' }, ru: { a: 'А' } })
 
     expect(translatePlugin('merge', 'en', 'a', [])).toBe('A')
     expect(translatePlugin('merge', 'en', 'b', [])).toBe('B')
-    expect(translatePlugin('merge', 'ja', 'a', [])).toBe('あ')
+    expect(translatePlugin('merge', 'ru', 'a', [])).toBe('А')
 
     one()
     two()
@@ -57,12 +57,12 @@ describe('plugin locale registry', () => {
 
   it('ctx.i18n.t reads the app runtime locale', () => {
     const i18n = createPluginI18n('runtime-plugin', noopTrack)
-    i18n.register({ en: { greet: 'hello' }, ja: { greet: 'こんにちは' } })
+    i18n.register({ en: { greet: 'hello' }, ru: { greet: 'привет' } })
 
     expect(i18n.t('greet')).toBe('hello')
 
-    setRuntimeI18nLocale('ja')
-    expect(i18n.t('greet')).toBe('こんにちは')
+    setRuntimeI18nLocale('ru')
+    expect(i18n.t('greet')).toBe('привет')
   })
 })
 
@@ -72,12 +72,12 @@ function Probe({ pluginId }: { pluginId: string }) {
   return <p data-testid="copy">{t('greet')}</p>
 }
 
-function SwitchToJa() {
+function SwitchToRu() {
   const { setLocale } = useI18n()
 
   return (
-    <button onClick={() => void setLocale('ja')} type="button">
-      to ja
+    <button onClick={() => void setLocale('ru')} type="button">
+      to ru
     </button>
   )
 }
@@ -86,12 +86,12 @@ describe('usePluginI18n', () => {
   it('re-renders on a locale switch', () => {
     const dispose = registerPluginLocales('hooked', {
       en: { greet: 'hello' },
-      ja: { greet: 'こんにちは' }
+      ru: { greet: 'привет' }
     })
 
     render(
       <I18nProvider configClient={null}>
-        <SwitchToJa />
+        <SwitchToRu />
         <Probe pluginId="hooked" />
       </I18nProvider>
     )
@@ -100,7 +100,7 @@ describe('usePluginI18n', () => {
 
     fireEvent.click(screen.getByRole('button'))
 
-    expect(screen.getByTestId('copy').textContent).toBe('こんにちは')
+    expect(screen.getByTestId('copy').textContent).toBe('привет')
 
     dispose()
   })

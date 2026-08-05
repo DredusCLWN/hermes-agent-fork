@@ -6,7 +6,7 @@ import type { HermesConfigRecord } from '@/hermes'
 import { type I18nConfigClient, I18nProvider, useI18n } from './context'
 import type { Locale } from './types'
 
-function LanguageProbe({ target = 'zh' }: { target?: Locale }) {
+function LanguageProbe({ target = 'ru' }: { target?: Locale }) {
   const { isLoadingConfig, isSavingLocale, locale, saveError, setLocale, t } = useI18n()
 
   return (
@@ -197,7 +197,7 @@ describe('I18nProvider', () => {
 
     render(
       <I18nProvider configClient={configClient}>
-        <LanguageProbe target="ja" />
+        <LanguageProbe target="ru" />
       </I18nProvider>
     )
 
@@ -205,26 +205,8 @@ describe('I18nProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'switch' }))
 
     await waitFor(() => expect(saveConfig).toHaveBeenCalledTimes(1))
-    expect(saveConfig).toHaveBeenCalledWith({ display: { language: 'ja', skin: 'mono' } })
-    expect(screen.getByTestId('locale').textContent).toBe('ja')
-  })
-
-  it('applies RTL direction for Arabic and restores LTR on switch back', async () => {
-    render(
-      <I18nProvider configClient={null} initialLocale="ar">
-        <LanguageProbe target="en" />
-      </I18nProvider>
-    )
-
-    expect(screen.getByTestId('locale').textContent).toBe('ar')
-    expect(document.documentElement.dir).toBe('rtl')
-    expect(document.documentElement.lang).toBe('ar')
-
-    fireEvent.click(screen.getByRole('button', { name: 'switch' }))
-
-    await waitFor(() => expect(screen.getByTestId('locale').textContent).toBe('en'))
-    expect(document.documentElement.dir).toBe('ltr')
-    expect(document.documentElement.lang).toBe('en')
+    expect(saveConfig).toHaveBeenCalledWith({ display: { language: 'ru', skin: 'mono' } })
+    expect(screen.getByTestId('locale').textContent).toBe('ru')
   })
 
   it('rolls back the visible locale when saving fails', async () => {

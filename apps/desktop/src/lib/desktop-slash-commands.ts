@@ -48,11 +48,9 @@ export type DesktopActionId =
   | 'browser'
   | 'compress'
   | 'handoff'
-  | 'hatch'
   | 'help'
   | 'journey'
   | 'new'
-  | 'pet'
   | 'profile'
   | 'skin'
   | 'title'
@@ -264,18 +262,6 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
     description: 'Switch personality for this session',
     surface: exec(),
     argumentMode: 'options'
-  },
-  {
-    name: '/pet',
-    description: 'Toggle or adopt a petdex mascot (/pet, /pet list, /pet boba)',
-    surface: action('pet'),
-    argumentMode: 'options'
-  },
-  {
-    name: '/hatch',
-    description: 'Generate a new pet (opens the pet generator)',
-    aliases: ['/generate-pet'],
-    surface: action('hatch')
   },
   {
     name: '/queue',

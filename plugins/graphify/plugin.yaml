@@ -1,0 +1,6 @@
+name: graphify
+version: 1.0.0
+description: "Auto-build and query codebase dependency graphs. Visualizes code structure in the dashboard."
+author: "NousResearch"
+hooks:
+  - on_session_start

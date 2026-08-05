@@ -2,10 +2,10 @@ import { atom } from 'nanostores'
 
 // Event-driven "backend data changed" signals — the workspace-events twin for
 // gateway-side state. The change watcher in tui_gateway broadcasts
-// `pet.changed` / `cron.changed` / `sessions.changed` when its on-disk
+// `cron.changed` / `sessions.changed` when its on-disk
 // signatures move (see server._broadcast_watched_changes), gateway-event.ts
 // routes them here, and the surfaces that used to poll (cron sidebar/page,
-// messaging lists, pet sprite, live session statuses) subscribe to these ticks
+// messaging lists, live session statuses) subscribe to these ticks
 // and refresh — so they move exactly when the backend acts and stay idle
 // otherwise.
 //
@@ -21,24 +21,9 @@ export const $sessionsChangeTick = atom(0)
 export const $platformsChangeTick = atom(0)
 export const $pairingChangeTick = atom(0)
 
-/** `pet.info.meta`-shaped payload carried on `pet.changed` — lets the pet skip
- *  the heavy sprite refetch when the broadcast already says enabled=false. */
-export interface PetChangeMeta {
-  enabled: boolean
-  slug?: string
-  displayName?: string
-  scale?: number
-  spritesheetRevision?: string
-}
-
-export const $petChange = atom<{ meta?: PetChangeMeta; tick: number }>({ tick: 0 })
 
 export function setChangeEventsAvailable(available: boolean): void {
   $changeEventsAvailable.set(available)
-}
-
-export function notifyPetChanged(meta?: PetChangeMeta): void {
-  $petChange.set({ meta, tick: $petChange.get().tick + 1 })
 }
 
 export function notifyCronChanged(): void {

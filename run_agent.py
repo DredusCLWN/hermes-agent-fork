@@ -4032,6 +4032,105 @@ class AIAgent:
             },
         )
 
+    # ── Auto session-end fact extraction ────────────────────────────────
+    _AUTO_EXTRACT_PATTERNS = [
+        (re.compile(r'\b(?:I prefer|I like|I always|I usually|I never|I hate|I love)\b', re.IGNORECASE), "user"),
+        (re.compile(r'\b(?:remember that|don\'t forget|note that|keep in mind)\b', re.IGNORECASE), "memory"),
+        (re.compile(r'\b(?:my (?:name|project|stack|framework|language|editor|os|terminal) is)\b', re.IGNORECASE), "user"),
+        (re.compile(r'\b(?:I use|I\'m using|we use|we\'re using)\b', re.IGNORECASE), "user"),
+        (re.compile(r'\b(?:decision:|decided to|we decided|let\'s go with)\b', re.IGNORECASE), "memory"),
+    ]
+    _AUTO_EXTRACT_MAX_MESSAGES = 30
+    _AUTO_EXTRACT_MAX_FACTS = 3
+
+    def _auto_extract_session_facts(self, messages: list) -> None:
+        """Extract durable facts from recent user messages and save to MemoryStore.
+
+        Runs at session end (shutdown_memory_provider). Scans the last
+        _AUTO_EXTRACT_MAX_MESSAGES user turns for preference/decision
+        patterns and saves up to _AUTO_EXTRACT_MAX_FACTS entries to the
+        built-in MemoryStore. No LLM call — pure pattern matching.
+
+        Skips if memory is disabled, the store is missing, or the memory
+        tool was never available (no point saving facts the agent can't
+        recall). Deduplicates against existing entries.
+        """
+        store = getattr(self, "_memory_store", None)
+        if store is None or not getattr(self, "_memory_enabled", False):
+            return
+        if not messages:
+            return
+        try:
+            existing_memory = set(
+                e.lower().strip() for e in (store.memory_entries or [])
+            )
+            existing_user = set(
+                e.lower().strip() for e in (store.user_entries or [])
+            )
+
+            # Scan recent user messages for patterns
+            user_msgs = [
+                m for m in messages[-self._AUTO_EXTRACT_MAX_MESSAGES:]
+                if isinstance(m, dict) and m.get("role") == "user"
+            ]
+
+            facts_added = 0
+            for msg in user_msgs:
+                if facts_added >= self._AUTO_EXTRACT_MAX_FACTS:
+                    break
+                content = msg.get("content", "")
+                if not isinstance(content, str) or not content.strip():
+                    continue
+                # Skip skill invocations and slash commands
+                stripped = content.strip()
+                if stripped.startswith("/") or stripped.startswith("[IMPORTANT:"):
+                    continue
+
+                for pattern, target in self._AUTO_EXTRACT_PATTERNS:
+                    if facts_added >= self._AUTO_EXTRACT_MAX_FACTS:
+                        break
+                    match = pattern.search(stripped)
+                    if match:
+                        # Extract the sentence containing the match
+                        sent_start = stripped.rfind(".", 0, match.start()) + 1
+                        sent_end = stripped.find(".", match.end())
+                        if sent_end == -1:
+                            sent_end = len(stripped)
+                        fact = stripped[sent_start:sent_end].strip()
+                        if len(fact) < 10 or len(fact) > 200:
+                            continue
+                        fact_lower = fact.lower()
+                        existing = existing_user if target == "user" else existing_memory
+                        if fact_lower in existing:
+                            continue
+                        # Save via the memory tool handler so consolidation
+                        # and char limits are respected.
+                        from tools.memory_tool import memory_tool
+                        result = memory_tool(
+                            action="add",
+                            target=target,
+                            content=fact,
+                            store=store,
+                        )
+                        import json as _json
+                        try:
+                            parsed = _json.loads(result)
+                            if parsed.get("success"):
+                                if target == "user":
+                                    existing_user.add(fact_lower)
+                                else:
+                                    existing_memory.add(fact_lower)
+                                facts_added += 1
+                                logger.info(
+                                    "Auto-extracted %s fact: %s",
+                                    target, fact[:80],
+                                )
+                        except Exception:
+                            pass
+                        break  # one fact per message
+        except Exception as e:
+            logger.debug("Auto session-end fact extraction failed: %s", e)
+
     def shutdown_memory_provider(self, messages: list = None) -> None:
         """Shut down the memory provider and context engine — call at actual session boundaries.
 
@@ -4040,6 +4139,13 @@ class AIAgent:
         NOT called per-turn — only at CLI exit, /reset, gateway
         session expiry, etc.
         """
+        # Auto-extract durable facts from the session before tearing down
+        # providers. This runs for the built-in MemoryStore (MEMORY.md /
+        # USER.md), which is NOT a memory provider and therefore does not
+        # receive on_session_end(). Without this, cross-session continuity
+        # relies entirely on the model manually calling the memory tool.
+        self._auto_extract_session_facts(messages or [])
+
         if self._memory_manager:
             try:
                 self._memory_manager.on_session_end(messages or [])
@@ -4083,6 +4189,61 @@ class AIAgent:
                 )
             except Exception:
                 pass
+
+    _SPECULATIVE_STOPWORDS = frozenset({
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "must", "shall", "can", "need", "dare",
+        "ought", "used", "and", "or", "but", "not", "no", "nor", "so", "yet",
+        "for", "with", "from", "into", "onto", "upon", "about", "above",
+        "below", "under", "over", "after", "before", "during", "through",
+        "between", "among", "this", "that", "these", "those", "there",
+        "here", "where", "when", "why", "how", "what", "which", "who",
+        "whom", "whose", "it", "its", "they", "them", "their", "we", "us",
+        "our", "you", "your", "he", "him", "his", "she", "her", "i", "me",
+        "my", "of", "in", "on", "at", "to", "by", "as", "if", "then",
+        "than", "also", "just", "only", "very", "more", "most", "some",
+        "any", "all", "each", "every", "both", "few", "many", "much",
+        "such", "same", "other", "another", "own", "same", "too",
+    })
+
+    def _derive_speculative_prefetch_query(
+        self, user_text: str, response_text: str
+    ) -> str:
+        """Derive a speculative prefetch query from the assistant response.
+
+        Extracts the most significant nouns/keywords from the response text
+        to predict what the user might ask about next. Returns an empty
+        string if no useful signal is found.
+
+        No LLM call — pure token frequency analysis. Falls back to the
+        first sentence of the response if keyword extraction yields nothing.
+        """
+        if not response_text or len(response_text) < 20:
+            return ""
+        # Strip code blocks and markdown headers — they pollute keyword freq
+        cleaned = re.sub(r"```[\s\S]*?```", " ", response_text)
+        cleaned = re.sub(r"#{1,6}\s", " ", cleaned)
+        # Extract word tokens (2+ chars, alphanumeric)
+        tokens = re.findall(r"[A-Za-z][A-Za-z0-9_]{1,}", cleaned)
+        if not tokens:
+            return ""
+        # Count frequency, excluding stopwords and user_text tokens
+        user_tokens = set(t.lower() for t in re.findall(r"[A-Za-z][A-Za-z0-9_]{1,}", user_text))
+        freq: dict[str, int] = {}
+        for token in tokens:
+            lower = token.lower()
+            if lower in self._SPECULATIVE_STOPWORDS or lower in user_tokens:
+                continue
+            freq[lower] = freq.get(lower, 0) + 1
+        if not freq:
+            return ""
+        # Pick top 5 keywords by frequency
+        top = sorted(freq.items(), key=lambda x: -x[1])[:5]
+        keywords = [kw for kw, _ in top]
+        if not keywords:
+            return ""
+        return " ".join(keywords)
 
     def _sync_external_memory_for_turn(
         self,
@@ -4147,6 +4308,18 @@ class AIAgent:
                     user_text,
                     session_id=self.session_id or "",
                 )
+                # Speculative prefetch: extract keywords from the assistant
+                # response and queue a second prefetch so memory providers
+                # warm context for likely follow-up queries (e.g. "tell me
+                # more about X" where X was mentioned in the response).
+                speculative_query = self._derive_speculative_prefetch_query(
+                    user_text, response_text
+                )
+                if speculative_query and speculative_query != user_text:
+                    self._memory_manager.queue_prefetch_all(
+                        speculative_query,
+                        session_id=self.session_id or "",
+                    )
         except Exception:
             pass
 

@@ -1,0 +1,14 @@
+{
+  "name": "graphify",
+  "label": "Code Graph",
+  "description": "Visual dependency graph of the codebase — auto-built, interactive",
+  "icon": "Code",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/graph",
+    "position": "after:sessions"
+  },
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}

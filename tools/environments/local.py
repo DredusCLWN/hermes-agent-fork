@@ -719,6 +719,63 @@ def build_subprocess_env(
     return env
 
 
+def _is_wsl_bash(path: str) -> bool:
+    """True if *path* is WSL's bash, not Git Bash.
+
+    WSL's bash lives at ``C:\\Windows\\System32\\bash.exe`` and is a Linux
+    subsystem launcher, not a Windows-native bash.  It can't resolve Windows
+    paths (``C:\\Users\\…``, ``/c/Users/…``), doesn't understand MSYS
+    conventions, and emits localized output in the system ANSI codepage
+    (cp1251 on Russian Windows) — which the UTF-8 drain decoder turns into
+    U+FFFD replacement chars (garbled output).
+    """
+    if not path or not _IS_WINDOWS:
+        return False
+    normalized = os.path.normpath(path).lower()
+    return normalized == r"c:\windows\system32\bash.exe" or normalized.endswith(r"\system32\bash.exe")
+
+
+def _find_git_bash_from_git_exe() -> "str | None":
+    """Locate Git Bash by resolving the ``git`` executable on PATH.
+
+    Git for Windows can be installed in non-standard locations (e.g.
+    ``G:\\Git``, ``D:\\Tools\\Git``) that the hardcoded candidate list in
+    ``_find_bash`` misses.  But ``git`` itself is usually on PATH, and its
+    install root always contains ``bin\\bash.exe``.  We resolve ``git``,
+    walk up to the install root, and check for bash there.
+
+    Returns the path to bash.exe or ``None`` if git isn't found or bash
+    doesn't exist alongside it.
+    """
+    if not _IS_WINDOWS:
+        return None
+    try:
+        git_path = shutil.which("git")
+        if not git_path:
+            return None
+        # git is typically at <root>\cmd\git.exe or <root>\bin\git.exe.
+        # Walk up to find the root containing bin\bash.exe.
+        git_dir = os.path.dirname(os.path.abspath(git_path))
+        # <root>\cmd → <root>
+        if os.path.basename(git_dir).lower() == "cmd":
+            root = os.path.dirname(git_dir)
+        # <root>\bin → <root>
+        elif os.path.basename(git_dir).lower() == "bin":
+            root = os.path.dirname(git_dir)
+        else:
+            root = git_dir
+        bash_candidate = os.path.join(root, "bin", "bash.exe")
+        if os.path.isfile(bash_candidate):
+            return bash_candidate
+        # MinGit layout: <root>\usr\bin\bash.exe
+        bash_alt = os.path.join(root, "usr", "bin", "bash.exe")
+        if os.path.isfile(bash_alt):
+            return bash_alt
+    except Exception:
+        pass
+    return None
+
+
 def _find_bash() -> str:
     """Find bash for command execution."""
     if not _IS_WINDOWS:
@@ -766,8 +823,30 @@ def _find_bash() -> str:
         if candidate and os.path.isfile(candidate) and candidate not in candidates:
             candidates.append(candidate)
 
+    # Discover Git Bash via `git --exec-path` or `where git` — handles
+    # non-standard install locations (e.g. G:\Git, D:\Tools\Git) that
+    # the hardcoded paths above miss.  `git` is usually on PATH even when
+    # bash.exe isn't, and its install root always contains bin\bash.exe.
+    _git_bash_via_git = _find_git_bash_from_git_exe()
+    if _git_bash_via_git and _git_bash_via_git not in candidates:
+        candidates.append(_git_bash_via_git)
+
     found = shutil.which("bash")
-    if found and found not in candidates:
+    # Reject WSL bash (C:\Windows\System32\bash.exe) — it doesn't
+    # understand Windows paths, runs in a Linux subsystem, and produces
+    # cp1251-encoded output that decodes as garbled UTF-8.  Only accept
+    # it as an absolute last resort if no Git Bash is found at all.
+    if found and found not in candidates and not _is_wsl_bash(found):
+        candidates.append(found)
+    elif found and not any(_bash_starts(c) for c in candidates):
+        # No Git Bash candidate passed the probe — warn before falling
+        # back to WSL, which will likely produce broken output.
+        logger.warning(
+            "No Git Bash found; falling back to %s which appears to be "
+            "WSL bash. Terminal commands may fail or produce garbled "
+            "output. Install Git for Windows or set HERMES_GIT_BASH_PATH.",
+            found,
+        )
         candidates.append(found)
 
     # Prefer the first candidate that can actually start.  A stale
@@ -1240,11 +1319,23 @@ def _apply_windows_msys_bash_env_defaults(env: dict) -> None:
     instead, so set both.  ``*`` disables all argv conversion — the semantic
     equivalent of ``MSYS_NO_PATHCONV=1``.  Also fixes ``cmd /c`` mangling
     (#56147).
+
+    Also force a UTF-8 locale.  Without ``LANG``/``LC_ALL``, MSYS2 may default
+    to the system ANSI codepage (cp1251 on Russian Windows, cp932 on Japanese,
+    etc.) when stdout is a pipe rather than a terminal.  The drain thread in
+    ``_wait_for_process`` decodes raw bytes as UTF-8 via an incremental
+    decoder — non-UTF-8 output becomes U+FFFD replacement chars, which the
+    model sees as "binary" or "garbled" text.  ``setdefault`` preserves any
+    explicit user/developer override.
     """
     if not _IS_WINDOWS:
         return
     env.setdefault("MSYS_NO_PATHCONV", "1")
     env.setdefault("MSYS2_ARG_CONV_EXCL", "*")
+    env.setdefault("LANG", "en_US.UTF-8")
+    env.setdefault("LC_ALL", "en_US.UTF-8")
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
 
 
 def _path_env_key(run_env: dict) -> str | None:

@@ -246,6 +246,15 @@ DEFAULT_CONFIG = {
         # matches a key in this dict.
         # Edit directly in config.yaml (no CLI support due to dots in keys).
         "reasoning_overrides": {},
+        # Token budgeting — automatic context-usage monitoring. The budget
+        # manager checks context fill before each API call and emits a warning
+        # at warning_threshold, then forces emergency compression at hard_limit.
+        # Does NOT mutate system prompt or messages — cache-safe.
+        "token_budget": {
+            "warning_threshold": 0.80,  # warn user at 80% context usage
+            "hard_limit": 0.95,         # force emergency compression at 95%
+            "per_turn_output_cap": 0,   # 0 = no per-turn output token cap
+        },
     },
 
     "terminal": {
@@ -526,6 +535,20 @@ DEFAULT_CONFIG = {
         "max_bytes": 50_000,
         "max_lines": 2000,
         "max_line_length": 2000,
+        # Head/tail split: when terminal output or a read_file page exceeds
+        # max_bytes/max_lines, keep this many lines from the top and bottom
+        # instead of a single head-only truncation. The omitted middle is
+        # stored in the artifact store (if enabled) and referenced by path.
+        "keep_first_lines": 50,
+        "keep_last_lines": 80,
+        # Artifact store: full tool output (terminal, read_file) is saved to
+        # ~/.hermes/artifacts/<date>/<uuid>.txt so nothing is lost. The model
+        # sees only the head+tail window; the full log is recoverable by path.
+        # Lazy cleanup at startup: deletes files older than artifact_ttl_days
+        # and enforces a total size cap of artifact_max_gb.
+        "artifact_store_enabled": True,
+        "artifact_ttl_days": 7,
+        "artifact_max_gb": 1,
     },
 
     # Tool loop guardrails nudge models when they repeat failed or
@@ -591,7 +614,7 @@ DEFAULT_CONFIG = {
                                       # (e.g. 6) for tool-schema-heavy sessions where 3
                                       # rounds cannot clear the request estimate.
                                       # Validated >= 1, hard-capped at 10.
-        "proactive_prune_tokens": 0,  # opt-in trigger (tokens) for the deterministic,
+        "proactive_prune_tokens": 48000,  # proactive prune trigger (tokens) — reclaims
                                       # no-LLM tool-result prune, run independently of
                                       # `threshold` above. On large-window models
                                       # `threshold` (≈50% of the window) rarely fires,
@@ -1174,6 +1197,10 @@ DEFAULT_CONFIG = {
         # handful of gateway slash-command replies).  Does NOT affect agent
         # responses, log lines, tool outputs, or slash-command descriptions.
         # Supported: en, zh, ja, de, es, fr, tr, uk.  Unknown values fall back to en.
+        "response_style": "caveman",  # terse, structured, no filler (cache-safe, static per session)
+        "caveman_mode": "auto",       # auto|brief|action|detailed — mode selection per turn
+        "ponytail": "",               # off by default; "ponytail" to enable lazy-minimal-code style
+        "ponytail_mode": "full",      # lite|full|ultra — intensity when ponytail is on
         "language": "en",
         # TUI busy indicator style: kaomoji (default), emoji, unicode (braille
         # spinner), or ascii.  Live-swappable via `/indicator <style>`.
@@ -2931,8 +2958,48 @@ DEFAULT_CONFIG = {
         "region": "global",
     },
 
+    # Agent presets — behavioral templates applied via `hermes agent select <name>`.
+    # Each preset deep-merges its values into config.yaml (user values win).
+    # NOT profiles (profiles = data isolation) — these are display/toolset/model
+    # presets that change how the agent behaves without touching HERMES_HOME.
+    "agent_presets": {
+        "default": {
+            "description": "Balanced agent for general tasks",
+            "model": "",
+            "toolsets": ["hermes-cli"],
+            "display": {"response_style": "caveman", "caveman_mode": "auto"},
+            "compression": {"threshold": 0.50},
+        },
+        "coder": {
+            "description": "Focused coding agent — lean toolset, coding context on. "
+                           "Run `hermes plugins enable graphify` for large repos (500K+ lines).",
+            "model": "",
+            "toolsets": ["hermes-cli"],
+            "agent": {"coding_context": "focus"},
+            "display": {"response_style": "caveman", "caveman_mode": "action"},
+        },
+        "researcher": {
+            "description": "Web research agent — web + browser tools, verbose output",
+            "model": "",
+            "toolsets": ["web", "browser"],
+            "display": {"response_style": "caveman", "caveman_mode": "detailed"},
+        },
+        "minimal": {
+            "description": "Minimal agent — terminal + file only, maximum token savings",
+            "model": "",
+            "toolsets": ["minimal"],
+            "display": {"response_style": "caveman", "caveman_mode": "brief"},
+            "compression": {"threshold": 0.35},
+        },
+    },
+
+    # Active agent preset — set by `hermes agent select <name>`. Empty = no
+    # preset applied (use raw config.yaml values). Changing this starts a new
+    # session (cache-safe — system prompt is rebuilt for the new preset).
+    "active_preset": "",
+
     # Config schema version - bump this when adding new required fields
-    "_config_version": 33,
+    "_config_version": 34,
 }
 
 # Optional environment variables that enhance functionality

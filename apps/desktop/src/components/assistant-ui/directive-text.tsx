@@ -557,9 +557,20 @@ const DirectiveChip: FC<{
   }
 
   return activate ? (
-    <button {...props} onClick={activate} type="button">
+    <span
+      {...props}
+      role="button"
+      tabIndex={0}
+      onClick={activate}
+      onKeyDown={event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          activate()
+        }
+      }}
+    >
       {body}
-    </button>
+    </span>
   ) : (
     <span {...props}>{body}</span>
   )

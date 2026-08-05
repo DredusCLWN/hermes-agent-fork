@@ -119,6 +119,19 @@ const AUX_TASKS: readonly AuxTaskMeta[] = [
 
 const NO_PROVIDERS: readonly ModelOptionProvider[] = [{ name: '—', slug: '', models: [] }]
 
+// Module-level cache: survives component unmount/remount when switching
+// settings tabs. Without this, every tab switch fires 4 API calls and
+// shows a skeleton until they all resolve — the main cause of intermittent
+// "settings take long to load" when revisiting the Model tab.
+interface ModelSettingsCache {
+  mainModel: { model: string; provider: string } | null
+  providers: ModelOptionProvider[]
+  auxiliary: AuxiliaryModelsResponse | null
+  moa: MoaConfigResponse | null
+  selectedMoaPreset: string
+}
+let _modelCache: ModelSettingsCache | null = null
+
 // Radix <Select> renders a blank trigger when `value` matches no <SelectItem>.
 // A custom model (e.g. one added via config that isn't in the provider's
 // curated list) would vanish — surface the active value so it stays selectable.
@@ -185,15 +198,17 @@ interface ModelSettingsProps {
 export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
   const { t } = useI18n()
   const m = t.settings.model
-  const [loading, setLoading] = useState(true)
+  // Initialize from module cache so a remount (tab switch) paints instantly
+  // instead of showing a skeleton while 4 API calls re-resolve.
+  const [loading, setLoading] = useState(!_modelCache)
   const [error, setError] = useState('')
-  const [mainModel, setMainModel] = useState<{ model: string; provider: string } | null>(null)
-  const [providers, setProviders] = useState<ModelOptionProvider[]>([])
-  const [selectedProvider, setSelectedProvider] = useState('')
-  const [selectedModel, setSelectedModel] = useState('')
-  const [auxiliary, setAuxiliary] = useState<AuxiliaryModelsResponse | null>(null)
-  const [moa, setMoa] = useState<MoaConfigResponse | null>(null)
-  const [selectedMoaPreset, setSelectedMoaPreset] = useState('')
+  const [mainModel, setMainModel] = useState<{ model: string; provider: string } | null>(_modelCache?.mainModel ?? null)
+  const [providers, setProviders] = useState<ModelOptionProvider[]>(_modelCache?.providers ?? [])
+  const [selectedProvider, setSelectedProvider] = useState(_modelCache?.mainModel?.provider ?? '')
+  const [selectedModel, setSelectedModel] = useState(_modelCache?.mainModel?.model ?? '')
+  const [auxiliary, setAuxiliary] = useState<AuxiliaryModelsResponse | null>(_modelCache?.auxiliary ?? null)
+  const [moa, setMoa] = useState<MoaConfigResponse | null>(_modelCache?.moa ?? null)
+  const [selectedMoaPreset, setSelectedMoaPreset] = useState(_modelCache?.selectedMoaPreset ?? '')
   const [newMoaPresetName, setNewMoaPresetName] = useState('')
   // agent.* defaults round-trip through the shared config cache (read → write
   // back the whole record), so a save here shows in the MCP/config surfaces.
@@ -225,7 +240,11 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
 
   const refresh = useCallback(async ({ replaceSelection = false }: { replaceSelection?: boolean } = {}) => {
     const epoch = profileEpoch.current
-    setLoading(true)
+    // Only show skeleton on first load (no cached data). Background refreshes
+    // keep the existing UI visible while fetching — no skeleton flash.
+    if (!_modelCache) {
+      setLoading(true)
+    }
     setError('')
 
     try {
@@ -254,8 +273,21 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
       setAuxiliary(auxiliaryModels)
       setMoa(moaModels)
 
+      let nextPreset = ''
       if (moaModels) {
-        setSelectedMoaPreset(prev => (prev && moaModels.presets[prev] ? prev : moaModels.default_preset))
+        nextPreset = selectedMoaPreset && moaModels.presets[selectedMoaPreset]
+          ? selectedMoaPreset
+          : moaModels.default_preset
+        setSelectedMoaPreset(nextPreset)
+      }
+
+      // Persist to module cache so a remount paints instantly.
+      _modelCache = {
+        mainModel: { model: modelInfo.model, provider: modelInfo.provider },
+        providers: modelOptions.providers || [],
+        auxiliary: auxiliaryModels,
+        moa: moaModels,
+        selectedMoaPreset: nextPreset
       }
 
       // The config record loads via its own shared query; a model switch can
@@ -286,6 +318,9 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
     setSelectedProvider('')
     setSelectedModel('')
     setApiKeyDraft('')
+    // Clear module cache so stale data from profile A doesn't flash in B.
+    _modelCache = null
+    setLoading(true)
     void refresh({ replaceSelection: true })
   })
 

@@ -3,8 +3,6 @@ import './styles.css'
 import './store/active-work'
 // Side-effect: mirrors the machine's AC/battery state for poll demotion.
 import './store/power'
-// Side-effect: applies the persisted window translucency on load.
-import './store/translucency'
 // Dev-only render/state churn counters. MUST precede the `react-dom` import
 // below: react-dom captures the devtools hook at module init, so bippy has to
 // install during THIS import's evaluation or every commit goes unseen
@@ -39,9 +37,7 @@ if (import.meta.env.MODE !== 'production' || import.meta.env.VITE_PERF_PROBE ===
 
 const winParam = new URLSearchParams(window.location.search).get('win')
 
-if (winParam === 'overlay') {
-  void import('./app/pet-overlay/overlay-root').then(({ mountPetOverlay }) => mountPetOverlay())
-} else if (winParam === 'quick') {
+if (winParam === 'quick') {
   void import('./app/quick-entry/quick-entry-root').then(({ mountQuickEntry }) => mountQuickEntry())
 } else {
   createRoot(document.getElementById('root')!).render(

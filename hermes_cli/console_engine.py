@@ -210,7 +210,7 @@ def _noop_console_command(_args: argparse.Namespace) -> None:
 # dashboard opens a fresh HermesConsoleEngine per /api/console connection, so
 # without memoization every reconnect re-imports + re-parses the whole surface.
 # Cache by args (all hashable strings); callers only read the returned map.
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=64)
 def _extracted_summaries(
     module_name: str,
     builder_name: str,
@@ -226,7 +226,7 @@ def _extracted_summaries(
         return {}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=64)
 def _registered_summaries(
     root: str,
     module_name: str,
@@ -243,7 +243,7 @@ def _registered_summaries(
         return {}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=64)
 def _builder_summaries(
     module_name: str,
     builder_name: str,
@@ -257,7 +257,7 @@ def _builder_summaries(
         return {}
 
 
-@functools.lru_cache(maxsize=None)
+@functools.lru_cache(maxsize=64)
 def _adder_summaries(module_name: str, add_name: str) -> dict[tuple[str, ...], str]:
     try:
         parser, subparsers = _parser_root()

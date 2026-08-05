@@ -18,12 +18,11 @@ import {
   refreshDataUrlReadMaxMb,
   setDataUrlReadMaxMb
 } from '@/store/data-url-read-max'
-import { $keepAwake, setKeepAwake } from '@/store/keep-awake'
 import { notify, notifyError } from '@/store/notifications'
 import { repoDiscoveryPolicyFromConfig, repoDiscoveryPolicySignature, scanAndRecordRepos } from '@/store/projects'
 import type { ConfigFieldSchema, HermesConfigRecord } from '@/types/hermes'
 
-import { setHermesConfigCache, useHermesConfigRecord } from '../hooks/use-config-record'
+import { HERMES_CONFIG_KEY, setHermesConfigCache, useHermesConfigRecord } from '../hooks/use-config-record'
 import { useOnProfileSwitch } from '../hooks/use-on-profile-switch'
 import { PanelEmpty } from '../overlays/panel'
 
@@ -34,6 +33,15 @@ import { ProviderConfigPanel } from './memory/provider-config-panel'
 import { ModelSettings, ModelSettingsSkeleton } from './model-settings'
 import { EmptyState, ListRow, SettingsContent, SettingsSkeleton, ToggleRow } from './primitives'
 import { QuickEntrySettings } from './quick-entry-settings'
+import { queryClient } from '@/lib/query-client'
+
+// Module-level caches: survive component unmount/remount when switching to a
+// non-config tab (appearance, about, …) and back. React Query's gcTime: Infinity
+// should keep the data, but getQueryData can still return undefined on remount
+// if the query observer was the only one and the internal cache entry was
+// evicted — so we mirror both here as a belt-and-suspenders fallback.
+let _configCache: HermesConfigRecord | null = null
+let _schemaCache: Record<string, ConfigFieldSchema> | null = null
 
 // On the Voice page, only surface the sub-fields of the *selected* TTS/STT
 // provider — otherwise every provider's options render at once (the "totally
@@ -68,11 +76,14 @@ export function ConfigSettings({
 }) {
   const { t } = useI18n()
   const c = t.settings.config
-  const keepAwake = useStore($keepAwake)
   // The editable draft is local (debounced autosave watches it), but it's seeded
   // from — and saved back through — the shared config cache, so edits are visible
-  // in the MCP/model surfaces and reopening the page doesn't reload-flash.
-  const [config, setConfig] = useState<HermesConfigRecord | null>(null)
+  // in MCP/model surfaces and reopening the page doesn't reload-flash.
+  // Initialize from the query cache so a remount (tab switch) paints instantly
+  // instead of flashing a skeleton while the query re-resolves.
+  const [config, setConfig] = useState<HermesConfigRecord | null>(() =>
+    queryClient.getQueryData<HermesConfigRecord>(HERMES_CONFIG_KEY) ?? _configCache ?? null
+  )
   const { data: loadedConfig, isError: configLoadFailed, refetch: refetchConfig } = useHermesConfigRecord()
 
   const {
@@ -82,28 +93,45 @@ export function ConfigSettings({
   } = useQuery({
     queryKey: ['hermes-config-schema'],
     queryFn: getHermesConfigSchema,
-    staleTime: 5 * 60 * 1000
+    staleTime: 5 * 60 * 1000,
+    gcTime: Infinity
   })
 
-  const schema = schemaResponse?.fields ?? null
+  const schema = schemaResponse?.fields ?? _schemaCache ?? null
   const [elevenLabsVoiceOptions, setElevenLabsVoiceOptions] = useState<string[] | null>(null)
   const [elevenLabsVoiceLabels, setElevenLabsVoiceLabels] = useState<Record<string, string>>({})
   const saveVersionRef = useRef(0)
-  const savedDiscoverySignatureRef = useRef<string | undefined>(undefined)
+  const savedDiscoverySignatureRef = useRef<string | undefined>(
+    config ? repoDiscoveryPolicySignature(repoDiscoveryPolicyFromConfig(config)) : undefined
+  )
   const [saveVersion, setSaveVersion] = useState(0)
 
   // Seed the local draft once, the first time the shared record lands.
   // Background refetches thereafter must not clobber in-progress edits.
-  const configSeeded = useRef(false)
+  // If config was already initialized from the query cache, mark as seeded
+  // so a background refetch doesn't overwrite in-progress edits.
+  const configSeeded = useRef(config !== null)
 
   // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
-    if (loadedConfig && !configSeeded.current) {
-      configSeeded.current = true
-      savedDiscoverySignatureRef.current = repoDiscoveryPolicySignature(repoDiscoveryPolicyFromConfig(loadedConfig))
-      setConfig(loadedConfig)
+    if (loadedConfig) {
+      _configCache = loadedConfig
+      if (!configSeeded.current) {
+        configSeeded.current = true
+        savedDiscoverySignatureRef.current = repoDiscoveryPolicySignature(repoDiscoveryPolicyFromConfig(loadedConfig))
+        setConfig(loadedConfig)
+      }
     }
   }, [loadedConfig])
+
+  // Persist schema to module cache so a remount paints instantly even after
+  // React Query GC'd the query observer data.
+  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
+  useEffect(() => {
+    if (schemaResponse?.fields) {
+      _schemaCache = schemaResponse.fields
+    }
+  }, [schemaResponse])
 
   // A profile switch invalidates (but doesn't clear) the shared config query, so
   // the local draft would otherwise keep profile A's data and autosave it into
@@ -115,6 +143,8 @@ export function ConfigSettings({
     setConfig(null)
     saveVersionRef.current = 0
     setSaveVersion(0)
+    _configCache = null
+    _schemaCache = null
   })
 
   useEffect(() => {
@@ -307,12 +337,6 @@ export function ConfigSettings({
           power-user, this-computer-only knobs. */}
       {activeSectionId === 'advanced' && (
         <>
-          <ToggleRow
-            checked={keepAwake}
-            description={c.keepAwakeDesc}
-            label={c.keepAwakeTitle}
-            onChange={setKeepAwake}
-          />
           <QuickEntrySettings />
         </>
       )}

@@ -3738,7 +3738,7 @@ PREVIOUS SUMMARY:
 NEW TURNS TO INCORPORATE:
 {content_to_summarize}{_memory_section}
 
-Update the summary using this exact structure. PRESERVE all existing information that is still relevant. ADD new completed actions to the numbered list (continue numbering). Move items from "In Progress" to "Completed Actions" when done. Move answered questions to "Resolved Questions". Update "Active State" to reflect current state. Remove information only if it is clearly obsolete. CRITICAL: Update "## Active Task" to reflect the user's most recent unfulfilled input — this includes any question, decision request, or discussion turn that the assistant has not yet answered. Only write "None" if the last exchange was fully resolved.
+Update the summary using this exact structure. PRESERVE all existing information that is still relevant. When preserving information from the PREVIOUS SUMMARY, copy specific details (file paths, line numbers, error messages, command outputs, exact values) VERBATIM — do not paraphrase, shorten, or reword them. Each successive compaction must not degrade detail quality: if the previous summary says "config.py:45 changed == to !=", carry that exact string forward, not "fixed a comparison bug". ADD new completed actions to the numbered list (continue numbering). Move items from "In Progress" to "Completed Actions" when done. Move answered questions to "Resolved Questions". Update "Active State" to reflect current state. Remove information only if it is clearly obsolete. CRITICAL: Update "## Active Task" to reflect the user's most recent unfulfilled input — this includes any question, decision request, or discussion turn that the assistant has not yet answered. Only write "None" if the last exchange was fully resolved.
 
 {_template_sections}"""
         else:
@@ -5931,6 +5931,100 @@ This compaction should PRIORITISE preserving all information related to the focu
             merged.append(msg)
         return merged
 
+    # Tools whose results indicate important state changes that should survive
+    # compression. A middle turn containing one of these is protected from
+    # summarization and retained verbatim in the tail.
+    _HIGH_PRIORITY_TOOL_NAMES = frozenset({
+        "write_file", "patch", "terminal", "read_file",
+    })
+    _ERROR_INDICATORS = ("error", "traceback", "failed", "exception", "errno")
+
+    def _rank_turns_by_importance(
+        self,
+        messages: List[Dict[str, Any]],
+        compress_start: int,
+        compress_end: int,
+    ) -> int:
+        """Return an adjusted compress_end that protects high-priority middle turns.
+
+        Scans the middle window for turns that carry critical information —
+        file writes/patches, terminal commands, error tracebacks — and extends
+        the tail boundary backward to include them verbatim instead of letting
+        the summarizer paraphrase them away.
+
+        The extension is bounded by a token budget so we don't negate the
+        compression's purpose by protecting too much.
+        """
+        if compress_end <= compress_start:
+            return compress_end
+
+        # Collect indices of high-priority turns in the middle window.
+        protect_indices: list[int] = []
+        for idx in range(compress_start, compress_end):
+            msg = messages[idx]
+            role = msg.get("role", "")
+
+            # Tool results with errors → always protect
+            if role == "tool":
+                content = msg.get("content", "")
+                if isinstance(content, str):
+                    content_lower = content.lower()
+                    if any(ind in content_lower for ind in self._ERROR_INDICATORS):
+                        protect_indices.append(idx)
+                        continue
+
+            # Assistant tool calls to file/terminal tools → protect
+            if role == "assistant":
+                tool_calls = msg.get("tool_calls") or []
+                for tc in tool_calls:
+                    if isinstance(tc, dict):
+                        fn = tc.get("function", {})
+                        name = fn.get("name", "") if isinstance(fn, dict) else ""
+                        if name in self._HIGH_PRIORITY_TOOL_NAMES:
+                            protect_indices.append(idx)
+                            break
+
+        if not protect_indices:
+            return compress_end
+
+        # Estimate token cost of protecting these turns. Cap at ~15% of
+        # threshold to avoid negating compression savings.
+        max_protect_tokens = int(self.threshold_tokens * 0.15)
+        protect_tokens = 0
+        new_compress_end = compress_end
+
+        for idx in sorted(protect_indices, reverse=True):
+            msg_tokens = estimate_tokens_rough(messages[idx].get("content", ""))
+            if protect_tokens + msg_tokens > max_protect_tokens:
+                break
+            # Extend tail backward to include this turn. All turns between
+            # new_compress_end and idx are also retained (they're context
+            # for the protected turn).
+            if idx + 1 > new_compress_end:
+                # Gap between current boundary and protected turn — only
+                # extend if the gap is small (<= 3 messages) to avoid
+                # pulling in a large unrelated chunk.
+                gap = idx + 1 - new_compress_end
+                if gap <= 3:
+                    new_compress_end = idx + 1
+                    protect_tokens += msg_tokens
+                # else: let it be summarized; the summary should capture it
+            else:
+                new_compress_end = idx + 1
+                protect_tokens += msg_tokens
+
+        if new_compress_end > compress_end:
+            if not self.quiet_mode:
+                logger.info(
+                    "Semantic compression: protecting %d high-priority turn(s), "
+                    "extending tail from %d to %d (~%d tokens)",
+                    len(protect_indices),
+                    compress_end,
+                    new_compress_end,
+                    protect_tokens,
+                )
+        return new_compress_end
+
     def compress(
         self,
         messages: List[Dict[str, Any]],
@@ -6097,6 +6191,13 @@ This compaction should PRIORITISE preserving all information related to the focu
                     self._ineffective_compression_count,
                 )
             return messages
+
+        # Semantic compression: protect high-priority middle turns (file
+        # writes, errors, terminal commands) by extending the tail boundary
+        # backward to retain them verbatim instead of summarizing them away.
+        compress_end = self._rank_turns_by_importance(
+            messages, compress_start, compress_end
+        )
 
         turns_to_summarize = messages[compress_start:compress_end]
         # Snapshot the rehydration state so an aborted attempt below can roll

@@ -640,6 +640,18 @@ export interface UsageStats {
   input: number
   output: number
   total: number
+  cache_read?: number
+  cache_write?: number
+  reasoning?: number
+  /** Estimated tokens saved by optimization tools (caching, caveman, compression). */
+  savings?: number
+  /** Breakdown of savings by source, for the footer display. */
+  savings_breakdown?: {
+    cache?: number
+    caveman?: number
+    compression?: number
+    ponytail?: number
+  }
 }
 
 /** One graph node in the star map (learned skill or memory chunk). */

@@ -198,6 +198,15 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
       }
     },
     {
+      icon: <Codicon name="debug" />,
+      id: 'devtools',
+      label: t.titlebar.toggleDevTools,
+      onSelect: () => {
+        triggerHaptic('open')
+        window.hermesDesktop.toggleDevTools()
+      }
+    },
+    {
       actionId: 'nav.settings',
       icon: <Codicon name="settings-gear" />,
       id: 'settings',

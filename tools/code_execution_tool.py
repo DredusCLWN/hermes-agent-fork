@@ -423,6 +423,21 @@ def _sandbox_failure_hint(stderr_text: str, enabled_tools=None) -> Optional[str]
                 "do not json.loads() them or index them like strings. "
                 "Example: read_file(path)['content']."
             )
+        # JS/TS written into the Python-only sandbox. The interpreter reports
+        # a bare SyntaxError pointing at the ES import/const/=>/backtick with
+        # no indication that the sandbox language is Python.
+        if "SyntaxError" in window and re.search(
+            r"import\s*\{[^}]*\}\s*from|^\s*(?:const|let)\s+\w+\s*=|=>|require\s*\(",
+            window,
+            re.M,
+        ):
+            return (
+                "The execute_code sandbox runs PYTHON, not JavaScript. Use "
+                "`from hermes_tools import terminal, write_file` (not "
+                "`import { … } from`), Python assignment (not const/let), and "
+                "def/lambda (not arrow functions). To run JS, call "
+                "terminal('node script.js') instead."
+            )
     except Exception:
         return None
     return None

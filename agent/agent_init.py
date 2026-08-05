@@ -1786,6 +1786,25 @@ def init_agent(
     # single turn; the runtime already executes such batches concurrently.
     agent._parallel_tool_call_guidance = bool(_agent_section.get("parallel_tool_call_guidance", True))
 
+    # Caveman response style — terse, structured output. Read from
+    # display.response_style (default "caveman"). Static per session.
+    # Intensity level from display.caveman_mode: lite/full/ultra/auto.
+    try:
+        _display_cfg = _agent_cfg.get("display", {})
+        if not isinstance(_display_cfg, dict):
+            _display_cfg = {}
+        agent._response_style = str(_display_cfg.get("response_style", "caveman") or "")
+        agent._caveman_mode = str(_display_cfg.get("caveman_mode", "auto") or "auto")
+        # Ponytail — lazy senior dev response style. Default "off".
+        # Intensity from display.ponytail_mode: lite/full/ultra.
+        agent._ponytail = str(_display_cfg.get("ponytail", "") or "")
+        agent._ponytail_mode = str(_display_cfg.get("ponytail_mode", "full") or "full")
+    except Exception:
+        agent._response_style = "caveman"
+        agent._caveman_mode = "auto"
+        agent._ponytail = ""
+        agent._ponytail_mode = "full"
+
     # Local Python toolchain probe toggle.  Default True.  When False,
     # the probe is skipped entirely (no subprocess calls, no system-prompt
     # line).  Useful for users on exotic setups where the probe heuristics

@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { useSessionView } from '@/app/chat/session-view'
 import { ModelMenuCloseContext } from '@/app/shell/model-menu-panel'
@@ -11,6 +11,7 @@ import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import { ChevronDown } from '@/lib/icons'
 import { formatModelStatusLabel } from '@/lib/model-status-label'
+import { contextBar, usageContextLabel } from '@/lib/statusbar'
 import { cn } from '@/lib/utils'
 import { $currentModelSource, $defaultReasoningEffort, setModelPickerOpen } from '@/store/session'
 
@@ -19,7 +20,7 @@ import { useComposerScope } from './scope'
 import type { ChatBarState } from './types'
 
 const PILL = cn(
-  'h-(--composer-control-size) max-w-40 shrink-0 gap-1 rounded-md px-2 text-xs font-normal',
+  'h-(--composer-control-size) max-w-56 shrink-0 gap-1 rounded-md px-2 text-xs font-normal',
   'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'
 )
 
@@ -53,6 +54,7 @@ export function ModelPill({
   const modelSource = useStore($currentModelSource)
   const defaultEffort = useStore($defaultReasoningEffort)
   const runtimeId = useStore(view.$runtimeId)
+  const usage = useStore(view.$usage)
   const [open, setOpen] = useState(false)
   const scope = useComposerScope()
   const hasLiveMenu = Boolean(model.modelMenuContent)
@@ -86,6 +88,19 @@ export function ModelPill({
   const pinnedOverride =
     view.kind === 'primary' && !runtimeId && modelSource === 'manual' && Boolean(currentModel.trim())
 
+  const contextLabel = useMemo(() => {
+    if (!usage || !usage.context_max) return ''
+    return usageContextLabel(usage)
+  }, [usage])
+
+  const contextBarText = useMemo(() => {
+    if (!usage || !usage.context_max) return ''
+    return contextBar(usage.context_percent, 6)
+  }, [usage])
+
+  const contextPercent = usage?.context_percent != null ? Math.round(usage.context_percent) : null
+  const contextWarn = contextPercent != null && contextPercent >= 80
+
   // The model resolves a beat after the gateway/session comes up. Rather than
   // flash a literal "No model", show a quiet loader (inherits the pill text
   // color at half opacity) until a model lands.
@@ -107,6 +122,14 @@ export function ModelPill({
           data-testid="model-pinned-dot"
           role="img"
         />
+      )}
+      {contextLabel && (
+        <span
+          className={cn('shrink-0 tabular-nums text-[0.625rem] opacity-60', contextWarn && 'text-(--ui-warning) opacity-100')}
+          title={contextPercent != null ? `${contextPercent}% context used` : undefined}
+        >
+          {contextBarText} {contextLabel}
+        </span>
       )}
       <ChevronDown className="size-2.5 shrink-0 opacity-50" />
     </>

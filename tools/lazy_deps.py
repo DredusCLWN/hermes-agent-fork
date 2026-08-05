@@ -311,6 +311,9 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     # (tests/test_project_metadata.py enforces both). When bumping: update
     # here AND `uv lock --upgrade-package huggingface-hub` in lockstep.
     "tool.trace_upload": ("huggingface-hub==1.24.0",),
+    # Code graph — tree-sitter AST dependency graph builder.
+    # Lazy-installed on first /build or graph_query call.
+    "tool.graphify": ("graphify>=0.9,<1.0",),
 }
 
 

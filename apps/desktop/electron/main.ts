@@ -10863,6 +10863,18 @@ ipcMain.handle('hermes:logs:reveal', async () => {
 
 ipcMain.handle('hermes:logs:recent', async () => ({ path: DESKTOP_LOG_PATH, lines: hermesLog.slice(-200) }))
 
+ipcMain.handle('hermes:devtools:toggle', event => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+
+  if (win && !win.isDestroyed()) {
+    if (win.webContents.isDevToolsOpened()) {
+      win.webContents.closeDevTools()
+    } else {
+      win.webContents.openDevTools({ mode: 'detach' })
+    }
+  }
+})
+
 function isExecutableFile(filePath) {
   if (!filePath || !path.isAbsolute(filePath)) {
     return false

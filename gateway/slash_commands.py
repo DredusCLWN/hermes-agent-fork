@@ -2559,6 +2559,102 @@ class GatewaySlashCommandsMixin:
         available = "`none`, " + ", ".join(f"`{n}`" for n in personalities)
         return t("gateway.personality.unknown", name=args, available=available)
 
+    async def _handle_caveman_command(self, event: MessageEvent) -> str:
+        """Handle /caveman [lite|full|ultra|off|status] — switch response style intensity."""
+        from gateway.run import _hermes_home, _load_gateway_config
+
+        args = event.get_command_args().strip().lower()
+        config_path = _hermes_home / 'config.yaml'
+
+        try:
+            config = _load_gateway_config()
+        except Exception:
+            config = {}
+
+        if args in ("", "status"):
+            style = str(config.get("display", {}).get("response_style", "") or "")
+            mode = str(config.get("display", {}).get("caveman_mode", "auto") or "auto")
+            if not style or style == "off":
+                return "Caveman: off\nUsage: /caveman [lite|full|ultra|off]"
+            return f"Caveman: {style} (mode: {mode})\nUsage: /caveman [lite|full|ultra|off]"
+
+        if args == "off":
+            try:
+                if "display" not in config or not isinstance(config.get("display"), dict):
+                    config["display"] = {}
+                config["display"]["response_style"] = ""
+                config["display"]["caveman_mode"] = "auto"
+                atomic_config_write(config_path, config)
+            except Exception as e:
+                return f"Failed to save: {e}"
+            return "Caveman: off. Responses back to normal. Start a new session for changes to take effect."
+
+        if args in ("lite", "full", "ultra"):
+            try:
+                if "display" not in config or not isinstance(config.get("display"), dict):
+                    config["display"] = {}
+                config["display"]["response_style"] = "caveman"
+                config["display"]["caveman_mode"] = args
+                atomic_config_write(config_path, config)
+            except Exception as e:
+                return f"Failed to save: {e}"
+            descs = {
+                "lite": "no filler, keep full sentences",
+                "full": "drop articles, fragments OK",
+                "ultra": "strip conjunctions, one word when one word enough",
+            }
+            return f"Caveman: {args} — {descs[args]}. Active next session."
+
+        return f"Unknown level: {args}\nAvailable: lite, full, ultra, off, status"
+
+    async def _handle_ponytail_command(self, event: MessageEvent) -> str:
+        """Handle /ponytail [lite|full|ultra|off|status] — switch lazy-code style."""
+        from gateway.run import _hermes_home, _load_gateway_config
+
+        args = event.get_command_args().strip().lower()
+        config_path = _hermes_home / 'config.yaml'
+
+        try:
+            config = _load_gateway_config()
+        except Exception:
+            config = {}
+
+        if args in ("", "status"):
+            ponytail = str(config.get("display", {}).get("ponytail", "") or "")
+            mode = str(config.get("display", {}).get("ponytail_mode", "full") or "full")
+            if not ponytail or ponytail == "off":
+                return "Ponytail: off\nUsage: /ponytail [lite|full|ultra|off]"
+            return f"Ponytail: {ponytail} (mode: {mode})\nUsage: /ponytail [lite|full|ultra|off]"
+
+        if args == "off":
+            try:
+                if "display" not in config or not isinstance(config.get("display"), dict):
+                    config["display"] = {}
+                config["display"]["ponytail"] = ""
+                config["display"]["ponytail_mode"] = "full"
+                atomic_config_write(config_path, config)
+            except Exception as e:
+                return f"Failed to save: {e}"
+            return "Ponytail: off. Normal code style. Start a new session for changes to take effect."
+
+        if args in ("lite", "full", "ultra"):
+            try:
+                if "display" not in config or not isinstance(config.get("display"), dict):
+                    config["display"] = {}
+                config["display"]["ponytail"] = "ponytail"
+                config["display"]["ponytail_mode"] = args
+                atomic_config_write(config_path, config)
+            except Exception as e:
+                return f"Failed to save: {e}"
+            descs = {
+                "lite": "build what's asked, name the lazier alternative",
+                "full": "the ladder enforced, stdlib and native first",
+                "ultra": "YAGNI extremist, deletion before addition",
+            }
+            return f"Ponytail: {args} — {descs[args]}. Active next session."
+
+        return f"Unknown level: {args}\nAvailable: lite, full, ultra, off, status"
+
     async def _handle_retry_command(self, event: MessageEvent) -> str:
         """Handle /retry command - re-send the last user message."""
         source = event.source

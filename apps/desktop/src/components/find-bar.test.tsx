@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FindBar } from '@/components/find-bar'
 import { I18nProvider } from '@/i18n'
 import { en } from '@/i18n/en'
-import { zh } from '@/i18n/zh'
+import { ru } from '@/i18n/ru'
 import { findBarClaimsCombo, findBarKeyAction, formatMatchLabel } from '@/lib/find-in-page'
 import { KEYBIND_ACTIONS } from '@/lib/keybinds/actions'
 import { comboAllowedInInput } from '@/lib/keybinds/combo'
@@ -224,7 +224,7 @@ describe('find-in-page keybind registration', () => {
   it('every registered find action has an i18n label (keybinds panel row)', () => {
     for (const id of ['view.findInPage', 'view.findNext', 'view.findPrevious']) {
       expect(en.keybinds.actions[id], id).toBeTruthy()
-      expect(zh.keybinds.actions[id], id).toBeTruthy()
+      expect(ru.keybinds.actions[id], id).toBeTruthy()
     }
   })
 })

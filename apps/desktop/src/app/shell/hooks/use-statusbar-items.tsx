@@ -34,7 +34,7 @@ import {
   sessionMatchesStoredId,
   setCurrentUsage
 } from '@/store/session'
-import { $focusedRuntimeId, $focusedSessionState, $focusedStoredSessionId } from '@/store/session-states'
+import { $focusedRuntimeId, $focusedSessionState, $focusedStoredSessionId, $sessionStates } from '@/store/session-states'
 import { $subagentsBySession, activeSubagentCount, failedSubagentCount } from '@/store/subagents'
 import { $gatewayRestarting } from '@/store/system-actions'
 import {
@@ -229,6 +229,26 @@ export function useStatusbarItems({
   const publishContextUsage = useCallback(
     (snapshot: Pick<UsageStats, 'context_max' | 'context_percent' | 'context_used'>) => {
       setCurrentUsage(current => ({ ...current, ...snapshot }))
+
+      // Also mirror into the per-session state so ModelPill (which reads
+      // state.usage for live sessions) gets the context breakdown fields
+      // that only session.context_breakdown provides, not gateway events.
+      const runtimeId = $focusedRuntimeId.get() ?? $activeSessionId.get()
+
+      if (runtimeId) {
+        const states = $sessionStates.get()
+        const state = states[runtimeId]
+
+        if (state) {
+          $sessionStates.set({
+            ...states,
+            [runtimeId]: {
+              ...state,
+              usage: { ...state.usage, ...snapshot } as UsageStats
+            }
+          })
+        }
+      }
     },
     []
   )

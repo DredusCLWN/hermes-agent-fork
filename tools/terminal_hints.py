@@ -51,12 +51,28 @@ def _hint_command_not_found(command: str, output: str) -> Optional[str]:
     if not m:
         return None
     missing = m.group(1)
+    import platform
+    if missing == "python3" and platform.system() == "Windows":
+        return (
+            "On Windows the interpreter is `python`, not `python3`. "
+            "Retry with `python` instead."
+        )
     if missing == "python":
+        if platform.system() == "Windows":
+            return (
+                "`python` was not found on PATH. Check `where python` or "
+                "use the project venv's interpreter (e.g. `.venv\\Scripts\\python`)."
+            )
         return (
             "This system has no bare `python` — use `python3`, or the "
             "project venv's interpreter (e.g. .venv/bin/python)."
         )
     if missing == "pip":
+        if platform.system() == "Windows":
+            return (
+                "`pip` was not found. Use `python -m pip`, or the project "
+                "venv's pip (e.g. `.venv\\Scripts\\pip`)."
+            )
         return (
             "This system has no bare `pip` — use `pip3`, `python3 -m pip`, "
             "or the project venv's pip (e.g. .venv/bin/pip)."
@@ -125,11 +141,43 @@ def _hint_permission_denied(command: str, output: str) -> Optional[str]:
     )
 
 
+def _hint_no_such_file_backslash(command: str, output: str) -> Optional[str]:
+    # Windows path with backslashes passed to bash — bash interprets
+    # backslashes as escape chars, not path separators. The error output
+    # shows the mangled path (e.g. 'C:UsersIdel' instead of 'C:\Users\Idel').
+    import platform
+    if platform.system() != "Windows":
+        return None
+    # Check if the command itself contains a backslash Windows path
+    if not re.search(r"[A-Za-z]:\\", command):
+        return None
+    if "No such file or directory" not in output:
+        return None
+    return (
+        "Bash on Windows does not understand backslash paths. "
+        "Use forward slashes (e.g. /c/Users/...) or quote the path with double quotes."
+    )
+
+
+def _hint_device_busy(command: str, output: str) -> Optional[str]:
+    # rm -rf fails with "Device or resource busy" when the CWD is inside
+    # the directory being deleted (common on Windows Git Bash).
+    if "Device or resource busy" not in output:
+        return None
+    return (
+        "The directory is busy because your shell's CWD is inside it (or a "
+        "file handle is open). `cd` to a parent directory first, then retry "
+        "the delete."
+    )
+
+
 # Ordered by production frequency — first match wins.
 _OUTPUT_HINTS: list[Callable[[str, str], Optional[str]]] = [
     _hint_gh_unknown_json_field,
     _hint_merge_conflict,
     _hint_command_not_found,
+    _hint_no_such_file_backslash,
+    _hint_device_busy,
     _hint_module_not_found,
     _hint_already_exists,
     _hint_gh_rate_limit,
@@ -168,3 +216,76 @@ def annotate_failure(command: str, exit_code: int, output: str) -> Optional[str]
             if hint:
                 return hint
     return _EXIT_CODE_HINTS.get(exit_code)
+
+
+# ---------------------------------------------------------------------------
+# Command-shape hints (fire regardless of exit code)
+# ---------------------------------------------------------------------------
+#
+# Some mistakes SUCCEED silently and so are invisible to ``annotate_failure``.
+# The canonical case is cmd.exe redirection syntax used inside bash: ``2>nul``
+# exits 0 and creates a junk file literally named ``nul`` in the cwd, which
+# then confuses every subsequent directory listing. These hints key on the
+# command string, not the output, and run on every terminal call.
+
+# ``nul`` is the cmd.exe null device. In bash it is an ordinary filename, so
+# ``2>nul`` creates/truncates a file called ``nul``. Matches ``>nul``,
+# ``2>nul``, ``1>nul``, ``&>nul``, ``>>nul`` with optional whitespace.
+_CMD_NUL_REDIRECT_RE = re.compile(r"(?:\d|&)?>>?\s*nul\b", re.I)
+
+# ``cmd /c ... >nul`` is correct — the redirect is interpreted by cmd.exe,
+# not bash, so ``nul`` really is the null device there.
+_CMD_EXE_INVOCATION_RE = re.compile(r"\bcmd(?:\.exe)?\s+/[ck]\b", re.I)
+
+# cmd.exe variable expansion (``%PATH%``). In bash these are literal text.
+# Requires a plausible env-var name to avoid matching printf/format strings.
+_CMD_PERCENT_VAR_RE = re.compile(r"%(?:PATH|USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP|CD|SYSTEMROOT|WINDIR|COMSPEC|HOMEPATH|USERNAME|PROGRAMFILES)%", re.I)
+
+
+def _hint_cmd_nul_redirect(command: str) -> Optional[str]:
+    if not _CMD_NUL_REDIRECT_RE.search(command):
+        return None
+    if _CMD_EXE_INVOCATION_RE.search(command):
+        return None  # cmd.exe owns the redirect; nul is correct there
+    return (
+        "`nul` is the cmd.exe null device, but this shell is bash — `2>nul` "
+        "does not discard output, it CREATES a file named `nul` in the "
+        "current directory. Use `2>/dev/null` instead (and delete any stray "
+        "`nul` file the earlier command left behind)."
+    )
+
+
+def _hint_cmd_percent_vars(command: str) -> Optional[str]:
+    m = _CMD_PERCENT_VAR_RE.search(command)
+    if not m:
+        return None
+    name = m.group(0).strip("%")
+    return (
+        f"`{m.group(0)}` is cmd.exe variable syntax and expands to nothing in "
+        f"bash. Use `${name}` (or `$\u007b{name}\u007d`) instead."
+    )
+
+
+_COMMAND_HINTS: list[Callable[[str], Optional[str]]] = [
+    _hint_cmd_nul_redirect,
+    _hint_cmd_percent_vars,
+]
+
+
+def annotate_command(command: str) -> Optional[str]:
+    """Return one hint for a malformed command shape, or None.
+
+    Unlike :func:`annotate_failure`, this inspects the command string and
+    fires regardless of exit code — the mistakes it catches (cmd.exe syntax
+    in bash) succeed silently and leave surprising side effects behind.
+    """
+    if not command:
+        return None
+    for fn in _COMMAND_HINTS:
+        try:
+            hint = fn(command)
+        except Exception:
+            continue
+        if hint:
+            return hint
+    return None

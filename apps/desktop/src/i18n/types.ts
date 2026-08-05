@@ -5,7 +5,7 @@
 // partial locales should use `defineLocale()` so missing desktop-only strings
 // fall back to English while new keys remain type-checked.
 
-export type Locale = 'en' | 'zh' | 'zh-hant' | 'ja' | 'ar'
+export type Locale = 'en' | 'ru'
 
 export type ToolTitleKey =
   | 'browser_click'
@@ -245,6 +245,7 @@ export interface Translations {
     openSettings: string
     openStarmap: string
     openKeybinds: string
+    toggleDevTools: string
     layoutEditor: string
     layoutEditorTitle: string
   }
@@ -1625,6 +1626,8 @@ export interface Translations {
       openInNewTab: string
       openInSplit: string
       copyIdFailed: string
+      copyLog: string
+      copyLogFailed: string
       sessionActions: string
       sessionRunning: string
       needsInput: string

@@ -10,6 +10,6 @@
  * Do NOT import this module statically from anything the entry graph
  * reaches, or the chunk moves back into boot.
  */
-import ShikiHighlighter from 'react-shiki'
+import ShikiHighlighter from 'react-shiki/web'
 
 export default ShikiHighlighter

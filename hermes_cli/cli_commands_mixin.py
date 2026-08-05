@@ -1298,6 +1298,92 @@ class CLICommandsMixin:
             print("  Usage: /personality <name>")
             print()
 
+    def _handle_caveman_command(self, cmd: str):
+        """Handle /caveman [lite|full|ultra|off|status] — switch response style intensity."""
+        from cli import save_config_value
+        parts = cmd.split(maxsplit=1)
+        arg = parts[1].strip().lower() if len(parts) > 1 else ""
+
+        if arg in ("", "status"):
+            try:
+                from hermes_cli.config import load_config
+                cfg = load_config() or {}
+                style = str(cfg.get("display", {}).get("response_style", "") or "")
+                mode = str(cfg.get("display", {}).get("caveman_mode", "auto") or "auto")
+            except Exception:
+                style, mode = "caveman", "auto"
+            if not style or style == "off":
+                print("  Caveman: off")
+            else:
+                print(f"  Caveman: {style} (mode: {mode})")
+            print("  Usage: /caveman [lite|full|ultra|off]")
+            return
+
+        if arg == "off":
+            save_config_value("display.response_style", "")
+            save_config_value("display.caveman_mode", "auto")
+            print("  Caveman: off. Responses back to normal.")
+            print("  Start a new session for changes to take effect.")
+            return
+
+        if arg in ("lite", "full", "ultra"):
+            save_config_value("display.response_style", "caveman")
+            save_config_value("display.caveman_mode", arg)
+            print(f"  Caveman: {arg}. Active next session.")
+            if arg == "lite":
+                print("  Lite = no filler, keep full sentences.")
+            elif arg == "full":
+                print("  Full = drop articles, fragments OK.")
+            elif arg == "ultra":
+                print("  Ultra = strip conjunctions, one word when one word enough.")
+            return
+
+        print(f"  Unknown level: {arg}")
+        print("  Available: lite, full, ultra, off, status")
+
+    def _handle_ponytail_command(self, cmd: str):
+        """Handle /ponytail [lite|full|ultra|off|status] — switch lazy-code style."""
+        from cli import save_config_value
+        parts = cmd.split(maxsplit=1)
+        arg = parts[1].strip().lower() if len(parts) > 1 else ""
+
+        if arg in ("", "status"):
+            try:
+                from hermes_cli.config import load_config
+                cfg = load_config() or {}
+                ponytail = str(cfg.get("display", {}).get("ponytail", "") or "")
+                mode = str(cfg.get("display", {}).get("ponytail_mode", "full") or "full")
+            except Exception:
+                ponytail, mode = "", "full"
+            if not ponytail or ponytail == "off":
+                print("  Ponytail: off")
+            else:
+                print(f"  Ponytail: {ponytail} (mode: {mode})")
+            print("  Usage: /ponytail [lite|full|ultra|off]")
+            return
+
+        if arg == "off":
+            save_config_value("display.ponytail", "")
+            save_config_value("display.ponytail_mode", "full")
+            print("  Ponytail: off. Normal code style.")
+            print("  Start a new session for changes to take effect.")
+            return
+
+        if arg in ("lite", "full", "ultra"):
+            save_config_value("display.ponytail", "ponytail")
+            save_config_value("display.ponytail_mode", arg)
+            print(f"  Ponytail: {arg}. Active next session.")
+            if arg == "lite":
+                print("  Lite = build what's asked, name the lazier alternative.")
+            elif arg == "full":
+                print("  Full = the ladder enforced, stdlib and native first.")
+            elif arg == "ultra":
+                print("  Ultra = YAGNI extremist, deletion before addition.")
+            return
+
+        print(f"  Unknown level: {arg}")
+        print("  Available: lite, full, ultra, off, status")
+
     def _handle_curator_command(self, cmd: str):
         """Handle /curator slash command.
 

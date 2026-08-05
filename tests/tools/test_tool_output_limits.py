@@ -59,11 +59,12 @@ class TestOverrides:
         }
         with patch("hermes_cli.config.load_config", return_value=cfg):
             limits = tol.get_tool_output_limits()
-        assert limits == {
-            "max_bytes": 100_000,
-            "max_lines": 5000,
-            "max_line_length": 4096,
-        }
+        assert limits["max_bytes"] == 100_000
+        assert limits["max_lines"] == 5000
+        assert limits["max_line_length"] == 4096
+        assert limits["keep_first_lines"] == tol.DEFAULT_KEEP_FIRST_LINES
+        assert limits["keep_last_lines"] == tol.DEFAULT_KEEP_LAST_LINES
+        assert limits["artifact_store_enabled"] == tol.DEFAULT_ARTIFACT_STORE_ENABLED
 
 
     def test_section_not_a_dict_falls_back(self):
@@ -97,12 +98,30 @@ class TestShortcuts:
                 "max_bytes": 111,
                 "max_lines": 222,
                 "max_line_length": 333,
+                "keep_first_lines": 30,
+                "keep_last_lines": 60,
+                "artifact_store_enabled": False,
+                "artifact_ttl_days": 14,
+                "artifact_max_gb": 2,
             }
         }
         with patch("hermes_cli.config.load_config", return_value=cfg):
             assert tol.get_max_bytes() == 111
             assert tol.get_max_lines() == 222
             assert tol.get_max_line_length() == 333
+            assert tol.get_keep_first_lines() == 30
+            assert tol.get_keep_last_lines() == 60
+            assert tol.is_artifact_store_enabled() is False
+            assert tol.get_artifact_ttl_days() == 14
+            assert tol.get_artifact_max_gb() == 2
+
+    def test_new_getters_return_defaults_when_config_missing(self):
+        with patch("hermes_cli.config.load_config", return_value={}):
+            assert tol.get_keep_first_lines() == tol.DEFAULT_KEEP_FIRST_LINES
+            assert tol.get_keep_last_lines() == tol.DEFAULT_KEEP_LAST_LINES
+            assert tol.is_artifact_store_enabled() == tol.DEFAULT_ARTIFACT_STORE_ENABLED
+            assert tol.get_artifact_ttl_days() == tol.DEFAULT_ARTIFACT_TTL_DAYS
+            assert tol.get_artifact_max_gb() == tol.DEFAULT_ARTIFACT_MAX_GB
 
 
 class TestDefaultConfigHasSection:
@@ -118,6 +137,11 @@ class TestDefaultConfigHasSection:
         assert section["max_bytes"] == tol.DEFAULT_MAX_BYTES
         assert section["max_lines"] == tol.DEFAULT_MAX_LINES
         assert section["max_line_length"] == tol.DEFAULT_MAX_LINE_LENGTH
+        assert section["keep_first_lines"] == tol.DEFAULT_KEEP_FIRST_LINES
+        assert section["keep_last_lines"] == tol.DEFAULT_KEEP_LAST_LINES
+        assert section["artifact_store_enabled"] == tol.DEFAULT_ARTIFACT_STORE_ENABLED
+        assert section["artifact_ttl_days"] == tol.DEFAULT_ARTIFACT_TTL_DAYS
+        assert section["artifact_max_gb"] == tol.DEFAULT_ARTIFACT_MAX_GB
 
 
 class TestIntegrationReadPagination:

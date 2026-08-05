@@ -12,12 +12,9 @@ import { Check, Download, Loader2, Palette, Trash2 } from '@/lib/icons'
 import { selectableCardClass } from '@/lib/selectable-card'
 import { normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
-import { $backdrop, setBackdrop } from '@/store/backdrop'
 import { $embedAllowed, $embedMode, clearEmbedAllowed, type EmbedMode, setEmbedMode } from '@/store/embed-consent'
 import { $activeGatewayProfile, $profiles, normalizeProfileKey } from '@/store/profile'
-import { $reactionsEnabled, setReactionsEnabled } from '@/store/reactions-enabled'
 import { $toolViewMode, setToolViewMode } from '@/store/tool-view'
-import { $translucency, setTranslucency } from '@/store/translucency'
 import { $zoomPercent, setZoomPercent } from '@/store/zoom'
 import { getBaseColors, useTheme } from '@/themes/context'
 import { installVscodeThemeFromMarketplace } from '@/themes/install'
@@ -25,7 +22,6 @@ import type { DesktopTheme } from '@/themes/types'
 import { $marketplaceInstalls, isUserTheme, removeUserTheme } from '@/themes/user-themes'
 
 import { MODE_OPTIONS } from './constants'
-import { PetSettings } from './pet-settings'
 import { ListRow, SectionHeading, SettingsContent } from './primitives'
 import { TerminalFontSetting } from './terminal-font-setting'
 
@@ -251,9 +247,6 @@ export function AppearanceSettings() {
   const zoomPercent = useStore($zoomPercent)
   const embedMode = useStore($embedMode)
   const embedAllowed = useStore($embedAllowed)
-  const translucency = useStore($translucency)
-  const reactionsEnabled = useStore($reactionsEnabled)
-  const backdrop = useStore($backdrop)
   const installs = useStore($marketplaceInstalls)
   const profiles = useStore($profiles)
   const activeProfileKey = normalizeProfileKey(useStore($activeGatewayProfile))
@@ -435,68 +428,6 @@ export function AppearanceSettings() {
 
           <ListRow
             action={
-              <div className="flex items-center gap-3">
-                <input
-                  aria-label={a.translucencyTitle}
-                  className="h-1 w-40 cursor-pointer appearance-none rounded-full bg-(--ui-stroke-tertiary)"
-                  max={100}
-                  min={0}
-                  onChange={event => {
-                    triggerHaptic('selection')
-                    setTranslucency(Number(event.target.value))
-                  }}
-                  step={5}
-                  style={{ accentColor: 'var(--dt-primary)' }}
-                  type="range"
-                  value={translucency}
-                />
-                <span className="w-9 text-right text-[length:var(--conversation-caption-font-size)] tabular-nums text-(--ui-text-tertiary)">
-                  {translucency}%
-                </span>
-              </div>
-            }
-            description={a.translucencyDesc}
-            title={a.translucencyTitle}
-          />
-
-          <ListRow
-            action={
-              <SegmentedControl
-                onChange={id => {
-                  triggerHaptic('selection')
-                  setBackdrop(id === 'on')
-                }}
-                options={[
-                  { id: 'off', label: t.common.off },
-                  { id: 'on', label: t.common.on }
-                ]}
-                value={backdrop ? 'on' : 'off'}
-              />
-            }
-            description={a.backdropDesc}
-            title={a.backdropTitle}
-          />
-
-          <ListRow
-            action={
-              <SegmentedControl
-                onChange={id => {
-                  triggerHaptic('selection')
-                  setReactionsEnabled(id === 'on')
-                }}
-                options={[
-                  { id: 'off', label: t.common.off },
-                  { id: 'on', label: t.common.on }
-                ]}
-                value={reactionsEnabled ? 'on' : 'off'}
-              />
-            }
-            description={a.reactionsDesc}
-            title={a.reactionsTitle}
-          />
-
-          <ListRow
-            action={
               <SegmentedControl
                 onChange={id => {
                   triggerHaptic('selection')
@@ -541,9 +472,6 @@ export function AppearanceSettings() {
         </div>
       </div>
 
-      <div className="mt-6">
-        <PetSettings />
-      </div>
     </SettingsContent>
   )
 }

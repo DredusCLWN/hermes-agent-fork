@@ -3024,6 +3024,18 @@ def terminal_tool(
             # Truncate output if too long, keeping both head and tail
             from tools.tool_output_limits import get_max_bytes
             MAX_OUTPUT_CHARS = get_max_bytes()
+
+            # Save full output to artifact store before truncation (if enabled).
+            # The model sees only the head+tail window; the full log is
+            # recoverable via the artifact_path reference.
+            _artifact_path = None
+            if len(output) > MAX_OUTPUT_CHARS:
+                try:
+                    from tools.artifact_store import save_artifact
+                    _artifact_path = save_artifact("terminal", output)
+                except Exception:
+                    pass
+
             if len(output) > MAX_OUTPUT_CHARS:
                 head_chars = int(MAX_OUTPUT_CHARS * 0.4)  # 40% head (error messages often appear early)
                 tail_chars = MAX_OUTPUT_CHARS - head_chars  # 60% tail (most recent/relevant output)
@@ -3068,11 +3080,25 @@ def terminal_tool(
                 except Exception:
                     failure_hint = None
 
+            # Command-shape hints run on EVERY call, not just failures.
+            # cmd.exe syntax in bash (``2>nul``, ``%PATH%``) exits 0 while
+            # doing the wrong thing — ``2>nul`` creates a junk file named
+            # ``nul`` instead of discarding output — so a failure-only hint
+            # would never fire. An explicit failure hint still wins.
+            if not failure_hint:
+                try:
+                    from tools.terminal_hints import annotate_command
+                    failure_hint = annotate_command(command)
+                except Exception:
+                    pass
+
             result_dict = {
                 "output": output,
                 "exit_code": returncode,
                 "error": None,
             }
+            if _artifact_path:
+                result_dict["artifact_path"] = _artifact_path
             # cwd echo: when the command changed the session's working
             # directory (cd, pushd, ...), tell the model where it ended up.
             # Production mining shows 60% of terminal calls carry a

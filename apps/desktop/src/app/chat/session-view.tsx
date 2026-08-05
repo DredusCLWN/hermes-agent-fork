@@ -3,6 +3,7 @@ import { createContext, useContext } from 'react'
 
 import type { ClientSessionState } from '@/app/types'
 import type { ChatMessage } from '@/lib/chat-messages'
+import type { UsageStats } from '@/types/hermes'
 import {
   $activeSessionId,
   $awaitingResponse,
@@ -12,6 +13,7 @@ import {
   $currentModel,
   $currentProvider,
   $currentReasoningEffort,
+  $currentUsage,
   $messages,
   $selectedStoredSessionId
 } from '@/store/session'
@@ -53,6 +55,7 @@ export interface SessionView {
   $provider: ReadableAtom<string>
   $fast: ReadableAtom<boolean>
   $reasoningEffort: ReadableAtom<string>
+  $usage: ReadableAtom<UsageStats | null>
 }
 
 /** The active session's own slice, or `undefined` while it's a draft. */
@@ -89,7 +92,8 @@ export const PRIMARY_SESSION_VIEW: SessionView = {
   $provider: primaryField<string>(state => state.provider, $currentProvider),
   $reasoningEffort: primaryField<string>(state => state.reasoningEffort, $currentReasoningEffort),
   $runtimeId: $activeSessionId,
-  $storedId: $selectedStoredSessionId
+  $storedId: $selectedStoredSessionId,
+  $usage: primaryField<UsageStats | null>(state => state.usage, $currentUsage)
 }
 
 const SessionViewContext = createContext<SessionView>(PRIMARY_SESSION_VIEW)

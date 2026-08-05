@@ -2752,6 +2752,16 @@ def run_setup_wizard(args):
     if not is_existing:
         _apply_default_agent_settings(config)
 
+    # Section 3b: Auto-detect environment, auto-enable Langfuse, smart routing.
+    _detected = _auto_detect_environment()
+    if _detected["langfuse"]:
+        _auto_enable_langfuse(config)
+    if not is_existing:
+        config.setdefault("smart_model_routing", {})["enabled"] = True
+        # Agent preset selection for first-time users.
+        print()
+        _prompt_agent_preset(config)
+
     # Section 4: Messaging Platforms
     if not (migration_ran and _skip_configured_section(config, "gateway", "Messaging Platforms")):
         setup_gateway(config)
@@ -2767,6 +2777,117 @@ def run_setup_wizard(args):
         print_info("If setup changed a value you customized, restore it with:")
         print_info(f"  cp {_backup_path} {config_path}")
     _print_setup_summary(config, hermes_home)
+
+
+def _auto_detect_environment() -> dict:
+    """Auto-detect available API keys and environment features.
+
+    Returns a dict with detected provider keys, langfuse availability, and
+    workspace context. Used by the setup wizard to skip unnecessary prompts.
+    """
+    detected = {
+        "providers": {},
+        "langfuse": False,
+        "is_workspace": False,
+    }
+
+    # Check for provider API keys in environment.
+    _provider_key_map = {
+        "OPENAI_API_KEY": "openai",
+        "ANTHROPIC_API_KEY": "anthropic",
+        "OPENROUTER_API_KEY": "openrouter",
+        "GOOGLE_API_KEY": "google",
+        "GEMINI_API_KEY": "google",
+        "XAI_API_KEY": "xai",
+        "GROQ_API_KEY": "groq",
+        "TOGETHER_API_KEY": "together",
+        "DEEPSEEK_API_KEY": "deepseek",
+        "MISTRAL_API_KEY": "mistral",
+        "NOUS_API_KEY": "nous",
+    }
+    for env_var, provider_id in _provider_key_map.items():
+        val = os.environ.get(env_var, "").strip()
+        if val:
+            detected["providers"][provider_id] = env_var
+
+    # Check for Langfuse keys.
+    if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY"):
+        detected["langfuse"] = True
+
+    # Check if cwd is a workspace (git repo or has project files).
+    cwd = Path.cwd()
+    if (cwd / ".git").exists() or (cwd / "package.json").exists() or (cwd / "pyproject.toml").exists():
+        detected["is_workspace"] = True
+
+    return detected
+
+
+def _auto_enable_langfuse(config: dict) -> bool:
+    """Auto-enable Langfuse telemetry if keys are detected in environment.
+
+    Returns True if Langfuse was enabled, False otherwise.
+    """
+    if not (os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")):
+        return False
+
+    langfuse_cfg = config.setdefault("langfuse", {})
+    if langfuse_cfg.get("enabled"):
+        return False  # already enabled
+
+    langfuse_cfg["enabled"] = True
+    print_info("  Langfuse telemetry auto-enabled (keys detected in environment).")
+    print_info("  Disable with: hermes config set langfuse.enabled false")
+    return True
+
+
+def _prompt_agent_preset(config: dict) -> None:
+    """Prompt the user to select an agent preset during first-time setup.
+
+    Applies the preset's values via deep-merge (user values win).
+    """
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+
+    presets = DEFAULT_CONFIG.get("agent_presets", {})
+    if not presets or not isinstance(presets, dict):
+        return
+
+    preset_names = list(presets.keys())
+    choices = []
+    for name in preset_names:
+        preset = presets.get(name, {})
+        desc = preset.get("description", "") if isinstance(preset, dict) else ""
+        choices.append(f"{name} — {desc}" if desc else name)
+
+    # Add a "skip" option.
+    choices.append("Skip — use raw config defaults")
+
+    selected = prompt_choice(
+        "Which agent preset fits your use case?",
+        choices,
+        0,
+        description="Presets configure toolsets, display style, and compression. "
+        "You can change later with: hermes agent select <name>",
+    )
+
+    if selected < len(preset_names):
+        name = preset_names[selected]
+        preset = presets[name]
+        if not isinstance(preset, dict):
+            return
+
+        # Deep-merge preset values (user values win).
+        for key, value in preset.items():
+            if key == "description":
+                continue
+            if key not in config or config.get(key) is None:
+                config[key] = value
+            elif isinstance(config.get(key), dict) and isinstance(value, dict):
+                for sub_key, sub_value in value.items():
+                    if sub_key not in config[key] or config[key].get(sub_key) is None:
+                        config[key][sub_key] = sub_value
+
+        config["active_preset"] = name
+        print_success(f"  Agent preset '{name}' applied.")
 
 
 def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
@@ -2813,6 +2934,18 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
 
     # Step 3: Apply defaults for everything else
     _apply_default_agent_settings(config)
+
+    # Step 3b: Auto-detect environment and auto-enable features.
+    _detected = _auto_detect_environment()
+    if _detected["langfuse"]:
+        _auto_enable_langfuse(config)
+
+    # Step 3c: Smart model routing — enabled for first-time setup.
+    config.setdefault("smart_model_routing", {})["enabled"] = True
+
+    # Step 3d: Agent preset selection.
+    print()
+    _prompt_agent_preset(config)
 
     save_config(config)
 
