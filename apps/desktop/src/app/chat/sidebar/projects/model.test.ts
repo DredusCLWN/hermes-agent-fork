@@ -69,10 +69,10 @@ describe('orderProjectsByIds', () => {
 })
 
 describe('sortProjectsForOverview', () => {
-  it('puts Home above the active project', () => {
+  it('puts Home first, then projects with sessions, then empty scans', () => {
     const active = { ...makeProject('active', 5), isAuto: false }
     const projects = [makeProject('scanned', 0), active, home()]
 
-    expect(ids(sortProjectsForOverview(projects, 'active'))).toEqual([NO_PROJECT_ID, 'active', 'scanned'])
+    expect(ids(sortProjectsForOverview(projects))).toEqual([NO_PROJECT_ID, 'active', 'scanned'])
   })
 })

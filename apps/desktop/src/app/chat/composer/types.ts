@@ -54,7 +54,11 @@ export interface ChatBarProps {
   onSteer?: (text: string) => Promise<boolean> | boolean
   onSubmit: (value: string, options?: SubmitTextOptions) => Promise<boolean> | boolean
   onTranscribeAudio?: (audio: Blob) => Promise<string>
-}
+    /** "Transfer to session": explicit in-project continuation that carries
+     * context (aux summary + recent tail) without reading as a cold start.
+     * Rendered once a chat accumulates enough user messages. */
+    transfer?: { can: boolean; busy: boolean; onTransfer: () => void }
+  }
 
 export type VoiceStatus = 'idle' | 'recording' | 'transcribing'
 

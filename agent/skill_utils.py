@@ -417,6 +417,23 @@ def _load_raw_config() -> Dict[str, Any]:
     return parsed
 
 
+def get_skills_index_mode() -> str:
+    """Read skills.index_mode from config.yaml.
+
+    Returns 'full' (default, backward-compatible) or 'hint' (compact mode:
+    system prompt contains only a short pointer to skills_list(query=...)
+    instead of the full skill index, saving tokens).
+    """
+    parsed = _load_raw_config()
+    if not parsed:
+        return "full"
+    skills_cfg = parsed.get("skills")
+    if not isinstance(skills_cfg, dict):
+        return "full"
+    mode = skills_cfg.get("index_mode", "full")
+    return mode if mode in ("full", "hint") else "full"
+
+
 def get_disabled_skill_names(platform: str | None = None) -> Set[str]:
     """Read disabled skill names from config.yaml.
 

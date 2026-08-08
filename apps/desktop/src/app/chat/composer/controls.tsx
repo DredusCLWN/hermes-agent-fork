@@ -29,25 +29,42 @@ export function ComposerControls({
   busyAction,
   canSubmit,
   compactModelPill = false,
-  disabled,
-  state,
-  onQueue
-}: {
-  busy: boolean
-  busyAction: 'steer' | 'queue' | 'stop'
-  canSubmit: boolean
-  compactModelPill?: boolean
-  disabled: boolean
-  state: ChatBarState
-  onQueue: () => void
-}) {
+    disabled,
+    state,
+    onQueue,
+    transfer
+  }: {
+    busy: boolean
+    busyAction: 'steer' | 'queue' | 'stop'
+    canSubmit: boolean
+    compactModelPill?: boolean
+    disabled: boolean
+    state: ChatBarState
+    onQueue: () => void
+    transfer?: { can?: boolean; busy?: boolean; onTransfer?: () => void }
+  }) {
   const { t } = useI18n()
   const c = t.composer
   const busyLabel = busyAction === 'queue' ? c.queueMessage : busyAction === 'steer' ? c.steer : c.stop
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-(--composer-control-gap)">
-      <ModelPill compact={compactModelPill} disabled={disabled} model={state.model} />
+          {transfer?.can ? (
+            <Tip label="Transfer to session">
+              <Button
+                aria-label="Transfer to session"
+                className={GHOST_ICON_BTN}
+                disabled={disabled || transfer.busy}
+                onClick={transfer.onTransfer}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Codicon name="arrow-right" size="0.875rem" />
+              </Button>
+            </Tip>
+          ) : null}
+          <ModelPill compact={compactModelPill} disabled={disabled} model={state.model} />
       {busyAction === 'steer' ? (
         <Tip label={<TipKeybindLabel actionId="composer.queue" text={c.queueMessage} />}>
           <Button

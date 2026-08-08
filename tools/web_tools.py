@@ -652,7 +652,7 @@ def web_search_tool(query: str, limit: int = 5) -> str:
     try:
         limit = int(limit)
     except (TypeError, ValueError):
-        limit = 5
+        limit = 3
     limit = min(max(limit, 1), 100)
 
     debug_call_data = {
@@ -722,7 +722,7 @@ def web_search_tool(query: str, limit: int = 5) -> str:
             response_data = provider.search(query, limit)
 
         debug_call_data["results_count"] = len(response_data.get("data", {}).get("web", []))
-        result_json = json.dumps(response_data, indent=2, ensure_ascii=False)
+        result_json = json.dumps(response_data, separators=(',', ':'), ensure_ascii=False)
         debug_call_data["final_response_size"] = len(result_json)
         _debug.log_call("web_search_tool", debug_call_data)
         _debug.save()
@@ -1002,11 +1002,10 @@ async def web_extract_tool(
             else:
                 logger.info("%s (%d chars, whole)", url, len(clean))
 
-        # Trim output to minimal fields per entry: title, content, error
+        # Trim output to minimal fields per entry: url, content, error
         trimmed_results = [
             {
                 "url": r.get("url", ""),
-                "title": r.get("title", ""),
                 "content": r.get("content", ""),
                 "error": r.get("error"),
                 **({  "blocked_by_policy": r["blocked_by_policy"]} if "blocked_by_policy" in r else {}),
@@ -1018,7 +1017,7 @@ async def web_extract_tool(
         if trimmed_response.get("results") == []:
             result_json = tool_error("Content was inaccessible or not found")
         else:
-            result_json = json.dumps(trimmed_response, indent=2, ensure_ascii=False)
+            result_json = json.dumps(trimmed_response, separators=(',', ':'), ensure_ascii=False)
 
         # base64 images were already converted to placeholders per-result above;
         # this is a belt-and-suspenders sweep over the serialized JSON in case a
@@ -1168,7 +1167,7 @@ from tools.registry import registry, tool_error
 
 WEB_SEARCH_SCHEMA = {
     "name": "web_search",
-    "description": "Search the web for information. Returns up to 5 results by default with titles, URLs, and descriptions. The query is passed through to the configured backend, so operators such as site:domain, filetype:pdf, intitle:word, -term, and \"exact phrase\" may work when the backend supports them.",
+    "description": "Search the web for information. Returns up to 3 results by default with titles, URLs, and descriptions. The query is passed through to the configured backend, so operators such as site:domain, filetype:pdf, intitle:word, -term, and \"exact phrase\" may work when the backend supports them.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -1178,10 +1177,10 @@ WEB_SEARCH_SCHEMA = {
             },
             "limit": {
                 "type": "integer",
-                "description": "Maximum number of results to return. Defaults to 5.",
+                "description": "Maximum number of results to return. Defaults to 3.",
                 "minimum": 1,
                 "maximum": 100,
-                "default": 5
+                "default": 3
             }
         },
         "required": ["query"]
@@ -1214,7 +1213,7 @@ registry.register(
     name="web_search",
     toolset="web",
     schema=WEB_SEARCH_SCHEMA,
-    handler=lambda args, **kw: web_search_tool(args.get("query", ""), limit=args.get("limit", 5)),
+    handler=lambda args, **kw: web_search_tool(args.get("query", ""), limit=args.get("limit", 3)),
     check_fn=check_web_api_key,
     requires_env=_web_requires_env(),
     emoji="🔍",

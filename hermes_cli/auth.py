@@ -152,6 +152,7 @@ SERVICE_PROVIDER_NAMES: Dict[str, str] = {
 LMSTUDIO_NOAUTH_PLACEHOLDER = "dummy-lm-api-key"
 
 
+
 # =============================================================================
 # Provider Registry
 # =============================================================================
@@ -1991,6 +1992,7 @@ def resolve_provider(
         "ollama": "custom", "ollama_cloud": "ollama-cloud",
         "vllm": "custom", "llamacpp": "custom",
         "llama.cpp": "custom", "llama-cpp": "custom",
+        "llama": "custom",
     }
     # Extend with aliases declared in plugins/model-providers/<name>/ that aren't already mapped.
     # This keeps providers/ as the single source for new aliases while the

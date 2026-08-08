@@ -202,7 +202,7 @@ def _gateway_compression_progress_notices_enabled() -> bool:
                 "on",
             }
     except Exception:
-        pass
+        logger.debug("progress_notices config read failed", exc_info=True)
     return False
 
 # Surfaces that consume gateway text programmatically (CLI/TUI "local"
@@ -468,7 +468,10 @@ def _redact_gateway_user_facing_secrets(text: str) -> str:
     except Exception:
         # Fail-soft: fall back to the local pattern pass below rather than
         # letting a redactor import/error leak the raw text to chat.
-        pass
+        logger.warning(
+            "redact_sensitive_text failed; falling back to local patterns only",
+            exc_info=True,
+        )
     for pattern in _GATEWAY_SECRET_PATTERNS:
         redacted = pattern.sub(lambda m: (m.group(1) if m.lastindex else "") + "[REDACTED]", redacted)
     return redacted
@@ -1756,8 +1759,9 @@ def _bridge_max_turns_from_config(home: "Path") -> None:
             from hermes_cli import managed_scope
             cfg = managed_scope.apply_managed_overlay(cfg)
         except Exception:
-            pass
+            logger.debug("managed_scope overlay failed in config reload", exc_info=True)
     except Exception:
+        logger.debug("config reload failed", exc_info=True)
         return
 
     agent_cfg = cfg.get("agent", {})
@@ -1930,7 +1934,7 @@ if _config_path.exists():
             from hermes_cli import managed_scope
             _cfg = managed_scope.apply_managed_overlay(_cfg)
         except Exception:
-            pass
+            logger.debug("managed_scope overlay failed in env bridge", exc_info=True)
         # Top-level simple values (fallback only — don't override .env)
         for _key, _val in _cfg.items():
             if isinstance(_val, (str, int, float, bool)) and _key not in os.environ:
@@ -2019,7 +2023,7 @@ if _config_path.exists():
             except Exception:
                 # Plugin discovery failure must not break gateway startup;
                 # built-in bridging stays intact.
-                pass
+                logger.debug("plugin auxiliary task discovery failed", exc_info=True)
 
             for _task_key in _aux_bridged_keys:
                 _task_cfg = _auxiliary_cfg.get(_task_key, {})
@@ -2538,7 +2542,7 @@ def _try_resolve_fallback_provider() -> dict | None:
                 logger.debug("Fallback entry %s failed: %s", entry.get("provider"), fb_exc)
                 continue
     except Exception:
-        pass
+        logger.debug("provider fallback resolution failed", exc_info=True)
     return None
 
 
@@ -2930,7 +2934,7 @@ def _check_unavailable_skill(command_name: str) -> str | None:
                         f"Install it with: `hermes skills install {install_path}`"
                     )
     except Exception:
-        pass
+        logger.debug("skill lookup failed", exc_info=True)
     return None
 
 
@@ -2965,6 +2969,7 @@ def _estimate_compression_savings(agent) -> int:
             return int(threshold * (savings_pct / 100) * count)
         return 0
     except Exception:
+        logger.debug("compression savings estimate failed", exc_info=True)
         return 0
 
 
@@ -3010,7 +3015,7 @@ def _load_gateway_config() -> dict:
             raw = read_raw_config()
             used_canonical = True
     except Exception:
-        pass
+        logger.debug("canonical config read failed", exc_info=True)
 
     if not used_canonical:
         try:
@@ -3030,7 +3035,7 @@ def _load_gateway_config() -> dict:
         from hermes_cli import managed_scope
         raw = managed_scope.apply_managed_overlay(raw if isinstance(raw, dict) else {})
     except Exception:
-        pass
+        logger.debug("managed_scope overlay failed in raw config", exc_info=True)
     if not isinstance(raw, dict):
         return {}
     # Canonicalize model-id aliases (model.name / model.model → model.default)
@@ -3043,7 +3048,7 @@ def _load_gateway_config() -> dict:
         from hermes_cli.config import _normalize_root_model_keys
         raw = _normalize_root_model_keys(raw)
     except Exception:
-        pass
+        logger.debug("root model key normalization failed", exc_info=True)
     return raw
 
 
@@ -3187,7 +3192,7 @@ def _resolve_hermes_bin() -> Optional[list[str]]:
         if importlib.util.find_spec("hermes_cli") is not None:
             return [sys.executable, "-m", "hermes_cli.main"]
     except Exception:
-        pass
+        logger.debug("hermes_cli module discovery failed", exc_info=True)
 
     return None
 
@@ -15644,7 +15649,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     except Exception:
                         _msg_custom_providers = _msg_cfg.get("custom_providers") or []
                 except Exception:
-                    pass
+                    logger.debug("context reference config load failed", exc_info=True)
                 # Resolve the session's actual model/provider/base_url the
                 # same way the hygiene compression block does (~11080).
                 # GatewayRunner has no self._model/self._base_url attrs
@@ -15695,7 +15700,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         if _msg_custom_ctx:
                             _msg_config_ctx = _msg_custom_ctx
                     except Exception:
-                        pass
+                        logger.debug("custom provider context length lookup failed", exc_info=True)
                 _msg_ctx_len = await get_model_context_length_async(
                     _msg_model,
                     base_url=_msg_base_url,
@@ -15959,7 +15964,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             _pcfg = _load_gateway_config()
             _redact_pii = bool((_pcfg.get("privacy") or {}).get("redact_pii", False))
         except Exception:
-            pass
+            logger.debug("redact_pii config read failed", exc_info=True)
 
         # Build the context prompt to inject.  The render is pinned per
         # session, keyed by a hash of the exact renderer inputs

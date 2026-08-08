@@ -270,6 +270,15 @@ DEFAULT_CONFIG = {
         # it here without patching the built desktop app.
         "font_family": "",
         "timeout": 180,
+        # Foreground command timeout: when a foreground terminal command runs
+        # longer than this (seconds), the tool returns a partial-output result
+        # with status "running" instead of killing the process. The agent then
+        # decides whether to continue waiting, background the process, or kill
+        # it. The agent can override this per-command via the timeout parameter.
+        # After command_timeout_max_checks consecutive timeouts, the tool returns
+        # status "timeout_exceeded" and the agent must take action.
+        "command_timeout": 120,
+        "command_timeout_max_checks": 5,
         # Bounded grace period (seconds) between SIGTERM and an escalated
         # SIGKILL when terminating a host process tree (browser daemons, etc.).
         # A daemon that stalls in its SIGTERM handler is force-killed after this
@@ -1198,7 +1207,7 @@ DEFAULT_CONFIG = {
         # responses, log lines, tool outputs, or slash-command descriptions.
         # Supported: en, zh, ja, de, es, fr, tr, uk.  Unknown values fall back to en.
         "response_style": "caveman",  # terse, structured, no filler (cache-safe, static per session)
-        "caveman_mode": "auto",       # auto|brief|action|detailed — mode selection per turn
+        "caveman_mode": "auto",       # auto|lite|full|ultra — intensity selection (auto=full)
         "ponytail": "",               # off by default; "ponytail" to enable lazy-minimal-code style
         "ponytail_mode": "full",      # lite|full|ultra — intensity when ponytail is on
         "language": "en",

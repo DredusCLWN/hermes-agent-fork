@@ -658,7 +658,7 @@ class GatewaySlashCommandsMixin:
 
         context_line = ""
         if context_total:
-            pct = min(100, round((context_used / context_total) * 100)) if context_total else 0
+            pct = round((context_used / context_total) * 100) if context_total else 0
             context_line = t(
                 "gateway.status.context",
                 used=f"{context_used:,}",

@@ -1158,6 +1158,15 @@ def _reap_idle_sessions() -> None:
         )
     _enforce_session_cap()
     _reclaim_orphaned_leases()
+    # Reap idle Relay runtime sessions to prevent unbounded accumulation.
+    try:
+        from agent.relay_runtime import HOST_REGISTRY
+        for host in HOST_REGISTRY._hosts.values():
+            reap = getattr(host, "reap_idle_sessions", None)
+            if callable(reap):
+                reap()
+    except Exception:
+        logger.debug("relay runtime idle reap failed", exc_info=True)
     # Periodic heap release for long-lived gateway processes.  Even when no
     # session is reaped, Python's generational GC rarely runs gen2 collection
     # under steady-state allocation, and glibc retains freed pages as RSS.
@@ -4839,6 +4848,10 @@ def _get_usage(agent) -> dict:
         "completion": g("session_completion_tokens"),
         "total": g("session_total_tokens"),
         "calls": g("session_api_calls"),
+        "cache_write": g("session_cache_write_tokens"),
+        "cost_usd": round(float(g("session_estimated_cost_usd")), 6) or 0,
+        "cost_status": getattr(agent, "session_cost_status", "unknown") or "unknown",
+        "cost_source": getattr(agent, "session_cost_source", "none") or "none",
     }
     comp = getattr(agent, "context_compressor", None)
     if comp:
@@ -4866,7 +4879,7 @@ def _get_usage(agent) -> dict:
         if ctx_max and last_prompt:
             usage["context_used"] = last_prompt
             usage["context_max"] = ctx_max
-            usage["context_percent"] = max(0, min(100, round(last_prompt / ctx_max * 100)))
+            usage["context_percent"] = max(0, round(last_prompt / ctx_max * 100))
         usage["compressions"] = getattr(comp, "compression_count", 0) or 0
     # Token savings from optimization tools (caching, caveman, compression).
     _cache_read = g("session_cache_read_tokens")
@@ -4874,38 +4887,59 @@ def _get_usage(agent) -> dict:
         usage["cache_read"] = _cache_read
     _compression_saved = 0
     if comp:
-        _count = getattr(comp, "compression_count", 0) or 0
-        if _count:
-            _last_rough = getattr(comp, "last_compression_rough_tokens", 0) or 0
-            if _last_rough:
-                _compression_saved = int(_last_rough * _count)
-            else:
-                _pct = getattr(comp, "_last_compression_savings_pct", 0) or 0
-                _threshold = getattr(comp, "threshold_tokens", 0) or 0
-                if _pct > 0 and _threshold > 0:
-                    _compression_saved = int(_threshold * (_pct / 100) * _count)
+        _cumulative = getattr(comp, "_compression_tokens_saved_total", 0) or 0
+        if _cumulative > 0:
+            _compression_saved = _cumulative
+        else:
+            _count = getattr(comp, "compression_count", 0) or 0
+            if _count:
+                _last_rough = getattr(comp, "last_compression_rough_tokens", 0) or 0
+                if _last_rough:
+                    _compression_saved = int(_last_rough * _count)
+                else:
+                    _pct = getattr(comp, "_last_compression_savings_pct", 0) or 0
+                    _threshold = getattr(comp, "threshold_tokens", 0) or 0
+                    if _pct > 0 and _threshold > 0:
+                        _compression_saved = int(_threshold * (_pct / 100) * _count)
     _caveman_active = bool(
         getattr(agent, "_response_style", "") and
         str(getattr(agent, "_response_style", "")).lower() == "caveman"
     )
-    _caveman_saved = 0
-    if _caveman_active:
-        _last_output = getattr(comp, "last_completion_tokens", 0) or 0 if comp else 0
-        if _last_output > 0:
-            _estimated_full = int(_last_output / (1 - 0.65))
-            _caveman_saved = _estimated_full - _last_output
-    # Ponytail — ~54% output token reduction (measured benchmark).
     _ponytail_active = bool(
         getattr(agent, "_ponytail", "") and
         str(getattr(agent, "_ponytail", "")).lower() == "ponytail"
     )
+    _caveman_saved = 0
     _ponytail_saved = 0
-    if _ponytail_active:
-        _last_output = getattr(comp, "last_completion_tokens", 0) or 0 if comp else 0
-        if _last_output > 0:
-            _estimated_full = int(_last_output / (1 - 0.54))
-            _ponytail_saved = _estimated_full - _last_output
-    _total_savings = _cache_read + _caveman_saved + _compression_saved + _ponytail_saved
+    if (_caveman_active or _ponytail_active):
+        # Use cumulative session output tokens, not just the last call's.
+        _total_output = g("session_output_tokens", "session_completion_tokens")
+        if _total_output > 0:
+            from hermes_cli.style_savings import estimate_style_savings
+            _style = estimate_style_savings(
+                _total_output,
+                caveman_active=_caveman_active,
+                ponytail_active=_ponytail_active,
+            )
+            _caveman_saved = _style["caveman_saved"]
+            _ponytail_saved = _style["ponytail_saved"]
+    # Terminal compression: chars saved by domain-aware compression.
+    try:
+        from tools.terminal_compression import get_terminal_compression_chars_saved
+        _terminal_chars = get_terminal_compression_chars_saved()
+        _terminal_tokens = _terminal_chars // 4  # rough: ~4 chars per token
+    except Exception:
+        _terminal_tokens = 0
+
+    # Micro-compact: actual tokens saved by context_compressor.
+    _micro_compact = 0
+    if comp:
+        _micro_compact = getattr(comp, "_micro_compact_tokens_saved_total", 0) or 0
+
+    _total_savings = _cache_read + _caveman_saved + _compression_saved + _ponytail_saved + _terminal_tokens + _micro_compact
+    _cleanup = getattr(agent, "_cleanup_metrics", {}) or {}
+    _cleanup_total = sum(_cleanup.values())
+    _total_savings += _cleanup_total
     if _total_savings > 0:
         usage["savings"] = _total_savings
         usage["savings_breakdown"] = {
@@ -4913,6 +4947,9 @@ def _get_usage(agent) -> dict:
             "caveman": _caveman_saved,
             "compression": _compression_saved,
             "ponytail": _ponytail_saved,
+            "terminal_compression": _terminal_tokens,
+            "micro_compact": _micro_compact,
+            **{f"cleanup_{k}": v for k, v in _cleanup.items()},
         }
     # Live count of background/async subagents still running (delegate_task
     # batches + background single delegations). Mirrors the classic CLI status
@@ -7988,8 +8025,11 @@ def _live_session_payload(
         if omit_messages
         else _live_visible_history(session, _get_db(), in_memory_history)
     )
+    info = _session_info(session.get("agent"), session)
+    fb = _fallback_session_info(session)
+    info.update({k: v for k, v in fb.items() if k not in info})
     payload = {
-        "info": _fallback_session_info(session),
+        "info": info,
         "message_count": len(history),
         "messages": [] if omit_messages else _history_to_messages(history),
         "messages_omitted": omit_messages,
@@ -12131,38 +12171,55 @@ def _details_completions(text: str) -> list[dict] | None:
     return []
 
 
-def _model_picker_context(agent):
-    """Layer live session state onto config without losing custom identity."""
+def _model_picker_context(agent, session=None):
+    """Layer live session state onto config without losing custom identity.
+
+    When *session* carries a ``profile_home``, bind it as a context-local
+    HERMES_HOME override so ``load_picker_context()`` reads that profile's
+    config.yaml instead of the launch profile's. Without this, a session
+    scoped to a named profile sees the wrong provider list (e.g. a
+    provider configured only in the profile is missing from the picker).
+    """
     from hermes_cli.inventory import load_picker_context
+    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
 
-    ctx = load_picker_context()
-    provider = getattr(agent, "provider", "") if agent else ""
-    base_url = getattr(agent, "base_url", "") if agent else ""
-    if str(provider or "").strip().lower() == "custom":
-        try:
-            from hermes_cli.runtime_provider import canonical_custom_identity
+    _home_token = None
+    if session:
+        ph = session.get("profile_home")
+        if ph:
+            _home_token = set_hermes_home_override(ph)
+    try:
+        ctx = load_picker_context()
+        provider = getattr(agent, "provider", "") if agent else ""
+        base_url = getattr(agent, "base_url", "") if agent else ""
+        if str(provider or "").strip().lower() == "custom":
+            try:
+                from hermes_cli.runtime_provider import canonical_custom_identity
 
-            provider = (
-                canonical_custom_identity(
-                    base_url=base_url or None,
-                    config_provider=ctx.current_provider,
-                    model=(getattr(agent, "model", "") if agent else "")
-                    or None,
+                provider = (
+                    canonical_custom_identity(
+                        base_url=base_url or None,
+                        config_provider=ctx.current_provider,
+                        model=(getattr(agent, "model", "") if agent else "")
+                        or None,
+                    )
+                    or provider
                 )
-                or provider
-            )
-        except Exception:
-            logger.debug(
-                "custom provider identity recovery failed (model picker)",
-                exc_info=True,
-            )
+            except Exception:
+                logger.debug(
+                    "custom provider identity recovery failed (model picker)",
+                    exc_info=True,
+                )
 
-    return ctx.with_overrides(
-        current_provider=provider,
-        current_model=(getattr(agent, "model", "") if agent else "")
-        or _resolve_model(),
-        current_base_url=base_url,
-    )
+        return ctx.with_overrides(
+            current_provider=provider,
+            current_model=(getattr(agent, "model", "") if agent else "")
+            or _resolve_model(),
+            current_base_url=base_url,
+        )
+    finally:
+        if _home_token is not None:
+            reset_hermes_home_override(_home_token)
 
 
 # ── Methods: slash.exec ──────────────────────────────────────────────

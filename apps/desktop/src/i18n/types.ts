@@ -741,6 +741,7 @@ export interface Translations {
       noProviderKeys: string
       searchKeys: string
       noKeysMatch: string
+      addCustomProvider: string
       localEndpoint: {
         title: string
         description: string

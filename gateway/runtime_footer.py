@@ -40,8 +40,6 @@ import os
 from typing import Any, Iterable, Optional
 
 _DEFAULT_FIELDS: tuple[str, ...] = ("model", "context_pct", "cwd")
-_CAVEMAN_SAVINGS_PCT = 65  # measured by JuliusBrussee/caveman benchmarks
-_PONYTAIL_SAVINGS_PCT = 54  # measured by DietrichGebert/ponytail agentic benchmark
 _SEP = " · "
 
 def _fmt_tokens(n: int) -> str:
@@ -178,25 +176,29 @@ def format_runtime_footer(
                 total_saved += cache_read_tokens
                 savings_parts.append(f"cache {_fmt_tokens(cache_read_tokens)}")
 
-            # 2. Caveman — estimated ~65% of output tokens.
-            if caveman_active and output_tokens > 0:
-                estimated_full = int(output_tokens / (1 - _CAVEMAN_SAVINGS_PCT / 100))
-                caveman_saved = estimated_full - output_tokens
-                total_saved += caveman_saved
-                mode_tag = f" ({caveman_mode})" if caveman_mode not in ("auto", "full") else ""
-                savings_parts.append(f"caveman{_mode_tag} {_fmt_tokens(caveman_saved)}")
+            # 2. Caveman + Ponytail — estimated output-token reductions.
+            #    Shared helper: both rates compress the same full baseline,
+            #    so they combine multiplicatively (savings compound).
+            from hermes_cli.style_savings import estimate_style_savings
+            _style = estimate_style_savings(
+                output_tokens,
+                caveman_active=caveman_active,
+                ponytail_active=ponytail_active,
+                caveman_mode=caveman_mode,
+            )
+            if _style["caveman_saved"] > 0:
+                total_saved += _style["caveman_saved"]
+                savings_parts.append(
+                    f"caveman{_style['mode_tag']} {_fmt_tokens(_style['caveman_saved'])}"
+                )
+            if _style["ponytail_saved"] > 0:
+                total_saved += _style["ponytail_saved"]
+                savings_parts.append(f"ponytail {_fmt_tokens(_style['ponytail_saved'])}")
 
             # 3. Context compression — estimated tokens saved by compression.
             if compression_saved_tokens > 0:
                 total_saved += compression_saved_tokens
                 savings_parts.append(f"compress {_fmt_tokens(compression_saved_tokens)}")
-
-            # 4. Ponytail — ~54% output token reduction (measured benchmark).
-            if ponytail_active and output_tokens > 0:
-                estimated_full = int(output_tokens / (1 - _PONYTAIL_SAVINGS_PCT / 100))
-                ponytail_saved = estimated_full - output_tokens
-                total_saved += ponytail_saved
-                savings_parts.append(f"ponytail {_fmt_tokens(ponytail_saved)}")
 
             if total_saved > 0:
                 parts.append(f"\u26a1 {_fmt_tokens(total_saved)} saved: " + " · ".join(savings_parts))

@@ -17,7 +17,7 @@ import { RowButton } from '@/components/ui/row-button'
 import { SearchField } from '@/components/ui/search-field'
 import { disconnectOAuthProvider, listOAuthProviders } from '@/hermes'
 import { useI18n } from '@/i18n'
-import { Check, ChevronDown, ChevronRight, KeyRound, Loader2, Terminal, Trash2 } from '@/lib/icons'
+import { Check, ChevronDown, ChevronRight, KeyRound, Loader2, Plus, Terminal, Trash2 } from '@/lib/icons'
 import { normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
 import { notify, notifyError } from '@/store/notifications'
@@ -486,6 +486,16 @@ export function ProvidersSettings({
         ) : (
           <NoProviderKeys />
         )}
+        <Button
+          className="mt-2 w-full justify-center border-dashed"
+          onClick={() => onViewChange('custom-endpoints')}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <Plus className="size-4" />
+          {t.settings.providers.addCustomProvider}
+        </Button>
       </SettingsContent>
     )
   }

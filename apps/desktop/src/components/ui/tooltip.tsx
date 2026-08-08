@@ -90,9 +90,10 @@ function TooltipTrigger({ onFocus, ...props }: React.ComponentProps<typeof Toolt
 function TooltipContent({
   className,
   sideOffset = 6,
+  rich = false,
   children,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+}: React.ComponentProps<typeof TooltipPrimitive.Content> & { rich?: boolean }) {
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
@@ -103,21 +104,29 @@ function TooltipContent({
         // elapses the chip appears at once.
         // pointer-events-none: the tip must never steal hover/clicks from the
         // chrome underneath (titlebar tools, adjacent tabs, etc.).
-        className={cn('pointer-events-none z-(--z-over-modal) w-fit max-w-64 select-none', className)}
+        className={cn(
+          'pointer-events-none z-(--z-over-modal) w-fit max-w-64 select-none',
+          rich && 'w-auto max-w-none rounded-lg border border-(--ui-stroke-secondary) bg-[var(--popover-surface)] p-3 text-popover-foreground backdrop-blur-md pointer-events-auto',
+          className
+        )}
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         {...props}
       >
-        {/* bg-foreground/text-background auto-inverts per theme. leading-normal
-            keeps lines readable; py-1 makes the cloned line-boxes overlap just
-            enough to read as one continuous fill (no gaps between lines). */}
-        {/* [&>*]:!inline-flex: a block-level label child (e.g. `flex`) collapses
-            this inline decoration's geometry, so Radix measures a zero-size chip
-            and parks an empty rectangle in the corner (#62022). Force any direct
-            child inline-flex so every call site stays safe. */}
-        <span className="box-decoration-clone inline bg-foreground px-1.5 py-1 text-[11px] font-bold leading-normal text-background [font-family:Arial,sans-serif] [&>*]:!inline-flex">
-          {children}
-        </span>
+        {rich ? (
+          children
+        ) : (
+          // bg-foreground/text-background auto-inverts per theme. leading-normal
+          // keeps lines readable; py-1 makes the cloned line-boxes overlap just
+          // enough to read as one continuous fill (no gaps between lines).
+          // [&>*]:!inline-flex: a block-level label child (e.g. `flex`) collapses
+          // this inline decoration's geometry, so Radix measures a zero-size chip
+          // and parks an empty rectangle in the corner (#62022). Force any direct
+          // child inline-flex so every call site stays safe.
+          <span className="box-decoration-clone inline bg-foreground px-1.5 py-1 text-[11px] font-bold leading-normal text-background [font-family:Arial,sans-serif] [&>*]:!inline-flex">
+            {children}
+          </span>
+        )}
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   )

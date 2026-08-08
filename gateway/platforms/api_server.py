@@ -6038,23 +6038,23 @@ class APIServerAdapter(BasePlatformAdapter):
                         getattr(agent, "_response_style", "") and
                         str(getattr(agent, "_response_style", "")).lower() == "caveman"
                     )
-                    _caveman_saved = 0
-                    if _caveman_active:
-                        _last_output = getattr(_comp, "last_completion_tokens", 0) or 0 if _comp else 0
-                        if _last_output > 0:
-                            _estimated_full = int(_last_output / (1 - 0.65))
-                            _caveman_saved = _estimated_full - _last_output
-                    # Ponytail — ~54% output token reduction (measured benchmark).
                     _ponytail_active = bool(
                         getattr(agent, "_ponytail", "") and
                         str(getattr(agent, "_ponytail", "")).lower() == "ponytail"
                     )
+                    _caveman_saved = 0
                     _ponytail_saved = 0
-                    if _ponytail_active:
+                    if (_caveman_active or _ponytail_active):
                         _last_output = getattr(_comp, "last_completion_tokens", 0) or 0 if _comp else 0
                         if _last_output > 0:
-                            _estimated_full = int(_last_output / (1 - 0.54))
-                            _ponytail_saved = _estimated_full - _last_output
+                            from hermes_cli.style_savings import estimate_style_savings
+                            _style = estimate_style_savings(
+                                _last_output,
+                                caveman_active=_caveman_active,
+                                ponytail_active=_ponytail_active,
+                            )
+                            _caveman_saved = _style["caveman_saved"]
+                            _ponytail_saved = _style["ponytail_saved"]
                     _total_savings = _cache_read + _caveman_saved + _compression_saved + _ponytail_saved
                     if _total_savings > 0:
                         usage["savings"] = _total_savings

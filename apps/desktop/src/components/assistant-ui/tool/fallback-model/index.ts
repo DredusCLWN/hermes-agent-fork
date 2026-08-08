@@ -77,6 +77,21 @@ function numericField(record: Record<string, unknown>, key: string): number | un
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+/**
+ * True when a foreground terminal command is still being monitored by the
+ * backend: its partial result carries a live process behind a `timeout` or
+ * `timeout_exceeded` status (a `status` of `exit*` / `error` / `killed`
+ * means it finished, and a finished `exit_code` result has no status at all).
+ * While true the tool row keeps a live "elapsed/max" timer and a "Running…"
+ * title across the repeated timeout checks, instead of freezing on the first
+ * partial result.
+ */
+function terminalProcessAlive(result: Record<string, unknown>): boolean {
+  const status = result.status
+
+  return status === 'timeout' || status === 'timeout_exceeded'
+}
+
 function readFileLineLabel(args: Record<string, unknown>, result: Record<string, unknown>): string {
   if (numericField(args, 'offset') === undefined && numericField(args, 'limit') === undefined) {
     return ''
@@ -1379,10 +1394,13 @@ function dynamicTitle(
     const command = shellCommand(args)
 
     if (command) {
-      const action =
-        part.toolName === 'execute_code'
-          ? verb(translateNow('assistant.tool.actions.runningCode'), translateNow('assistant.tool.actions.ranCode'))
-          : verb(translateNow('assistant.tool.actions.running'), translateNow('assistant.tool.actions.ran'))
+      const processAlive = part.toolName === 'terminal' && terminalProcessAlive(result)
+      // A partial `timeout` result still has a live process behind it — keep
+      // the gerund ("Running…") until the process actually finishes, so the
+      // title matches the still-ticking timer.
+      const action = processAlive
+        ? translateNow('assistant.tool.actions.running')
+        : verb(translateNow('assistant.tool.actions.running'), translateNow('assistant.tool.actions.ran'))
 
       return titledAction(
         action,
@@ -1473,6 +1491,7 @@ export function buildToolView(part: ToolPart, inlineDiff: string): ToolView {
   const hasSplitStreams = rendersAnsi && (Boolean(stdout) || Boolean(stderrRaw))
   const terminalCommand = part.toolName === 'terminal' ? shellCommand(argsRecord) : undefined
   const terminalExitCode = part.toolName === 'terminal' ? numericField(resultRecord, 'exit_code') : undefined
+  const processAlive = part.toolName === 'terminal' ? terminalProcessAlive(resultRecord) : false
 
   return {
     countLabel: resultCount ? formatCountLabel(resultCount) : undefined,
@@ -1483,7 +1502,8 @@ export function buildToolView(part: ToolPart, inlineDiff: string): ToolView {
     imageUrl: toolImageUrl(argsRecord, resultRecord),
     inlineDiff,
     previewTarget: toolPreviewTarget(part.toolName, argsRecord, resultRecord),
-    rendersAnsi: rendersAnsi || undefined,
+        processAlive: processAlive || undefined,
+        rendersAnsi: rendersAnsi || undefined,
     searchQuery: searchQuery || undefined,
     searchHits: searchHits?.length ? searchHits : undefined,
     stderr: hasSplitStreams ? stderrRaw || undefined : undefined,

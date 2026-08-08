@@ -2295,9 +2295,9 @@ class ContextCompressor(ContextEngine):
         self.abort_on_summary_failure = abort_on_summary_failure
 
         # ── Micro-compaction (per-turn rolling compaction) ─────────
-        # Default: OFF. Each pass rewrites already-sent history, so it breaks
-        # the prompt-cache prefix every turn instead of at an episodic
-        # boundary. Operators opt in via `compression.micro_compact: true`.
+        # Default overridden by agent_init.py from config (default: True,
+        # every_n=5). Each pass rewrites already-sent history, breaking the
+        # prompt-cache prefix — the cadence gate amortizes this cost.
         self._micro_compact_enabled: bool = False
         self._micro_compact_cursor: int = 0
         self._micro_compact_rolling_summary: str = ""
@@ -2334,6 +2334,7 @@ class ContextCompressor(ContextEngine):
         self._tail_token_budget: int | None = None
         self._max_summary_tokens: int | None = None
         self.compression_count = 0
+        self._compression_tokens_saved_total: int = 0
 
         # The "initialized" log reports resolved token budgets, which would
         # force the deferred get_model_context_length() probe to run inside

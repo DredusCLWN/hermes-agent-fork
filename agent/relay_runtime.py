@@ -9,6 +9,7 @@ import importlib
 import inspect
 import logging
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -36,6 +37,7 @@ class RelaySession:
     closing: bool = False
     handle: Any = None
     context: contextvars.Context | None = None
+    last_active: float = field(default_factory=time.time)
 
 
 class RelayRuntime:
@@ -91,6 +93,7 @@ class RelayRuntime:
                     parent_session_id=parent_session_id,
                 )
                 self._sessions[session_id] = session
+            session.last_active = time.time()
         with session.lock:
             if session.closing:
                 return None
@@ -341,6 +344,25 @@ class RelayRuntime:
                 session_id,
                 "; ".join(failures),
             )
+
+    def reap_idle_sessions(self, idle_seconds: float = 3600) -> int:
+        """Close sessions that have been idle longer than *idle_seconds*.
+
+        Returns the number of sessions reaped. Called by the gateway idle
+        reaper to prevent unbounded session accumulation in long-lived
+        processes. Sessions with active turns are skipped.
+        """
+        cutoff = time.time() - idle_seconds
+        reaped = 0
+        with self._sessions_lock:
+            idle_ids = [
+                sid for sid, s in self._sessions.items()
+                if s.last_active < cutoff and not s.closing
+            ]
+        for sid in idle_ids:
+            self.close_session({"session_id": sid})
+            reaped += 1
+        return reaped
 
     def shutdown(self) -> None:
         """Close all core-owned Relay session scopes."""

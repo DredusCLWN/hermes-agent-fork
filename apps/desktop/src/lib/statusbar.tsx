@@ -53,9 +53,9 @@ export function contextBarLabel(usage: UsageStats): string {
     return ''
   }
 
-  const pct = Math.max(0, Math.min(100, Math.round(usage.context_percent ?? 0)))
+  const pct = Math.max(0, Math.round(usage.context_percent ?? 0))
 
-  return `[${contextBar(usage.context_percent)}] ${pct}%`
+    return `[${contextBar(usage.context_percent)}] ${pct}%`
 }
 
 export function LiveDuration({ since }: { since: number | null | undefined }) {

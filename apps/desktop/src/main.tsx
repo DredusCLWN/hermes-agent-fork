@@ -1,4 +1,6 @@
 import './styles.css'
+// Side-effect: suppress @assistant-ui/store "Clamped stale index" console spam.
+import './lib/suppress-console-spam'
 // Side-effect: reports in-flight turns to the main process for the quit guard.
 import './store/active-work'
 // Side-effect: mirrors the machine's AC/battery state for poll demotion.

@@ -1,0 +1,8 @@
+{
+  "name": "daily-report",
+  "label": "Daily",
+  "description": "Daily agent report — what to do today, what was done yesterday, grounded in your memory + sessions. Honest, no flattery.",
+  "icon": "Calendar",
+  "version": "1.0.0",
+  "api": "plugin_api.py"
+}

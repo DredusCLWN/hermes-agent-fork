@@ -113,6 +113,478 @@ _API_CALL_MODULES = frozenset({
     "chat_completion_helpers",
 })
 
+_MULTI_NEWLINE_RE = re.compile(r"\n{4,}")
+_PERSISTED_TAG_RE = re.compile(r"<persisted-output>")
+
+
+# Tools whose output must never be compressed — the risk of distorting
+# a critical result outweighs any token savings.
+_PROTECTED_TOOLS = frozenset({
+    "execute_code",
+    "memory",
+    "skill_manage",
+    "skill_view",
+    "approval",
+})
+
+
+def _estimate_content_tokens(api_messages: List[Dict[str, Any]]) -> int:
+    """Rough token estimate for message content (~4 chars per token).
+
+    Counts tool results AND assistant reasoning/content so that cleanup
+    passes operating on assistant messages (e.g. reasoning strip) produce
+    accurate deltas.
+    """
+    total = 0
+    for msg in api_messages:
+        role = msg.get("role")
+        if role == "tool":
+            content = msg.get("content")
+            if isinstance(content, str):
+                total += len(content) // 4
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and "text" in part:
+                        total += len(part["text"]) // 4
+        elif role == "assistant":
+            rc = msg.get("reasoning_content")
+            if isinstance(rc, str):
+                total += len(rc) // 4
+            rd = msg.get("reasoning_details")
+            if isinstance(rd, str):
+                total += len(rd) // 4
+            elif isinstance(rd, list):
+                for part in rd:
+                    if isinstance(part, dict):
+                        total += len(str(part.get("content", ""))) // 4
+            content = msg.get("content")
+            if isinstance(content, str):
+                total += len(content) // 4
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and "text" in part:
+                        total += len(part["text"]) // 4
+    return total
+
+
+def _dedup_tool_results(api_messages: List[Dict[str, Any]]) -> int:
+    """Replace byte-identical tool results with a short back-reference marker.
+
+    Only applies to ``role="tool"`` messages with string content that is not
+    already a ``<persisted-output>`` block (those are already short). The first
+    occurrence is kept verbatim; subsequent identical copies become
+    ``"[Same result as above]"`` — the model sees the full content once and a
+    terse reference for each duplicate, saving tokens without losing context.
+
+    Returns chars saved. Operates on per-request copies only.
+    """
+    saved = 0
+    seen: Dict[str, int] = {}  # content hash -> first occurrence index
+    for msg in api_messages:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        if _PERSISTED_TAG_RE.search(content):
+            continue
+        if content in seen:
+            marker = "[Same result as above]"
+            if len(marker) < len(content):
+                saved += len(content) - len(marker)
+                msg["content"] = marker
+        else:
+            seen[content] = 1
+    return saved
+
+
+def _normalize_tool_whitespace(api_messages: List[Dict[str, Any]]) -> int:
+    """Collapse 4+ consecutive newlines to 2 in tool result content.
+
+    Many tools (terminal, web_extract, search_files) return output with
+    excessive blank lines. Normalizing to at most 2 consecutive newlines
+    saves tokens without losing any information. Code blocks inside tool
+    results are not special-cased — the normalization is whitespace-only
+    and does not alter any non-whitespace characters.
+
+    Returns chars saved. Operates on per-request copies only.
+    """
+    saved = 0
+    for msg in api_messages:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        if "\n\n\n\n" in content:
+            new = _MULTI_NEWLINE_RE.sub("\n\n", content)
+            saved += len(content) - len(new)
+            msg["content"] = new
+    return saved
+
+
+def _compact_json_tool_output(api_messages: List[Dict[str, Any]]) -> int:
+    """Compact-serialize JSON tool results — lossless whitespace removal.
+
+    If a tool result is valid JSON (starts with ``{`` or ``[``), re-serialize
+    it with ``separators=(',', ':')`` to remove indentation and spaces after
+    colons/commas. The data is byte-identical in semantics — no keys or
+    values are removed, added, or reordered.
+
+    Returns chars saved. Protected tools are skipped.
+    Operates on per-request copies only.
+    """
+    saved = 0
+    for msg in api_messages:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str) or len(content) < 40:
+            continue
+        if _PERSISTED_TAG_RE.search(content):
+            continue
+        tool_name = msg.get("name", "")
+        if tool_name in _PROTECTED_TOOLS:
+            continue
+        stripped = content.lstrip()
+        if not stripped or stripped[0] not in "{[":
+            continue
+        try:
+            parsed = json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        compact = json.dumps(parsed, separators=(",", ":"), ensure_ascii=False)
+        if len(compact) < len(content):
+            saved += len(content) - len(compact)
+            msg["content"] = compact
+    return saved
+
+
+def _compact_json_table(api_messages: List[Dict[str, Any]]) -> int:
+    """Transform homogeneous JSON arrays into schema + rows format.
+
+    If a tool result is a JSON array of objects with identical keys, transform
+    it into ``{"_table": true, "schema": [...keys], "rows": [[v1, v2, ...], ...]}``.
+    This eliminates repeated key names, saving tokens losslessly — the model
+    can reconstruct any row by zipping schema with the row array.
+
+    Only applies when:
+    - Array has 5+ items (below that, savings are marginal)
+    - Each item has 4+ keys (below that, not worth the overhead)
+    - All items have identical key sets (homogeneous)
+
+    Returns chars saved. Protected tools are skipped.
+    Operates on per-request copies only.
+    """
+    saved = 0
+    for msg in api_messages:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str) or len(content) < 200:
+            continue
+        if _PERSISTED_TAG_RE.search(content):
+            continue
+        tool_name = msg.get("name", "")
+        if tool_name in _PROTECTED_TOOLS:
+            continue
+        stripped = content.lstrip()
+        if not stripped or stripped[0] != "[":
+            continue
+        try:
+            parsed = json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(parsed, list) or len(parsed) < 5:
+            continue
+        if not all(isinstance(item, dict) for item in parsed):
+            continue
+        first_keys = list(parsed[0].keys())
+        if len(first_keys) < 4:
+            continue
+        if not all(list(item.keys()) == first_keys for item in parsed):
+            continue
+        rows = [[item[k] for k in first_keys] for item in parsed]
+        compact = json.dumps(
+            {"_table": True, "schema": first_keys, "rows": rows},
+            separators=(",", ":"), ensure_ascii=False,
+        )
+        if len(compact) < len(content):
+            saved += len(content) - len(compact)
+            msg["content"] = compact
+    return saved
+
+
+def _aggregate_repeated_lines(api_messages: List[Dict[str, Any]]) -> int:
+    """Collapse consecutive identical lines in tool output with a count.
+
+    Terminal/build outputs often repeat the same line many times (compiler
+    warnings, progress bars, repeated log entries). Replacing N identical
+    consecutive lines with ``[N× line]`` preserves the information that the
+    line appeared N times while saving N-1 lines of tokens.
+
+    Only applies when there are 3+ consecutive identical lines (2 identical
+    lines are common in normal output and not worth collapsing).
+    Returns chars saved. Protected tools are skipped.
+    Operates on per-request copies only.
+    """
+    saved = 0
+    for msg in api_messages:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str) or len(content) < 100:
+            continue
+        if _PERSISTED_TAG_RE.search(content):
+            continue
+        tool_name = msg.get("name", "")
+        if tool_name in _PROTECTED_TOOLS:
+            continue
+        lines = content.split("\n")
+        if len(lines) < 4:
+            continue
+        result: List[str] = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            count = 1
+            while i + count < len(lines) and lines[i + count] == line:
+                count += 1
+            if count >= 3 and line.strip():
+                result.append(f"[{count}\u00d7 {line}]")
+            else:
+                result.extend(lines[i:i + count])
+            i += count
+        new_content = "\n".join(result)
+        if len(new_content) < len(content):
+            saved += len(content) - len(new_content)
+            msg["content"] = new_content
+    return saved
+
+
+# ── Extended cleanup passes (token optimization) ─────────────────────────────
+
+
+_REASONING_STRIP_TAIL = 10  # keep reasoning on last N assistant messages
+
+
+def _strip_old_reasoning(api_messages: List[Dict[str, Any]]) -> int:
+    """Remove reasoning_content/reasoning_details from assistant messages older
+    than the last N. Reasoning is only useful for multi-turn continuity on
+    recent turns; old reasoning just burns tokens.
+
+    Returns chars saved. Operates on per-request copies only.
+    """
+    saved = 0
+    assistant_indices = [
+        i for i, m in enumerate(api_messages)
+        if m.get("role") == "assistant"
+    ]
+    if len(assistant_indices) <= _REASONING_STRIP_TAIL:
+        return 0
+    cutoff = assistant_indices[-_REASONING_STRIP_TAIL]
+    for i in assistant_indices:
+        if i >= cutoff:
+            break
+        msg = api_messages[i]
+        if "reasoning_content" in msg:
+            rc = msg.get("reasoning_content", "")
+            if isinstance(rc, str):
+                saved += len(rc)
+            msg.pop("reasoning_content", None)
+        if "reasoning_details" in msg:
+            rd = msg.get("reasoning_details")
+            if isinstance(rd, str):
+                saved += len(rd)
+            elif isinstance(rd, list):
+                for part in rd:
+                    if isinstance(part, dict):
+                        saved += len(str(part.get("content", "")))
+            msg.pop("reasoning_details", None)
+    return saved
+
+
+_READ_FILE_TOOL_NAMES = frozenset({"read_file", "read_file_lines", "cat"})
+
+
+def _dedup_read_file_results(api_messages: List[Dict[str, Any]]) -> int:
+    """For repeated reads of the same file path with the same offset/limit,
+    keep only the latest result and replace older ones with a short
+    back-reference. Reads with different offset/limit (different chunks of
+    the same file) are preserved — the model needs both chunks.
+
+    Returns chars saved. Operates on per-request copies only.
+    """
+    saved = 0
+    # Map tool_call_id -> (path, offset, limit) from assistant tool_calls
+    call_id_to_sig: Dict[str, str] = {}
+    for msg in api_messages:
+        if msg.get("role") != "assistant":
+            continue
+        tool_calls = msg.get("tool_calls") or []
+        for tc in tool_calls:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") or {}
+            name = fn.get("name", "")
+            if name not in _READ_FILE_TOOL_NAMES:
+                continue
+            try:
+                args = json.loads(fn.get("arguments", "{}"))
+            except (json.JSONDecodeError, ValueError):
+                continue
+            path = args.get("path") or args.get("file_path") or args.get("filename")
+            if not path or not tc.get("id"):
+                continue
+            offset = args.get("offset") or args.get("start_line") or 0
+            limit = args.get("limit") or args.get("end_line") or 0
+            sig = f"{path}|{offset}|{limit}"
+            call_id_to_sig[tc["id"]] = sig
+
+    # Track last occurrence per signature; replace earlier identical ones
+    sig_to_last_idx: Dict[str, int] = {}
+    for i, msg in enumerate(api_messages):
+        if msg.get("role") != "tool":
+            continue
+        call_id = msg.get("tool_call_id", "")
+        sig = call_id_to_sig.get(call_id)
+        if not sig:
+            continue
+        sig_to_last_idx[sig] = i
+
+    # Second pass: replace all but the last occurrence per signature
+    for i, msg in enumerate(api_messages):
+        if msg.get("role") != "tool":
+            continue
+        call_id = msg.get("tool_call_id", "")
+        sig = call_id_to_sig.get(call_id)
+        if not sig:
+            continue
+        last_idx = sig_to_last_idx.get(sig, -1)
+        if i < last_idx:
+            path = sig.split("|")[0]
+            marker = f"[Older read of {path} (same range) — see latest]"
+            old_content = msg.get("content", "")
+            if len(marker) < len(old_content):
+                saved += len(old_content) - len(marker)
+                msg["content"] = marker
+    return saved
+
+
+def _strip_empty_tool_results(api_messages: List[Dict[str, Any]]) -> int:
+    """Replace empty or whitespace-only tool results with a minimal marker.
+    The model doesn't need to see 500 spaces or a blank string from a tool.
+
+    Returns chars saved. Operates on per-request copies only.
+    """
+    saved = 0
+    for msg in api_messages:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str):
+            continue
+        if not content.strip() and len("[empty]") < len(content):
+            saved += len(content) - len("[empty]")
+            msg["content"] = "[empty]"
+    return saved
+
+
+_TERMINAL_TOOL_NAMES = frozenset({"run_terminal", "terminal", "execute_command", "bash"})
+_TERMINAL_TAIL_LINES = 50
+_TERMINAL_HEAD_LINES = 20
+
+
+def _truncate_old_terminal(api_messages: List[Dict[str, Any]]) -> int:
+    """Truncate terminal tool results that are older than the last few messages.
+    Keeps the first N and last M lines with a hidden-line count marker.
+    Recent terminal output is preserved verbatim for the active workflow.
+
+    Returns chars saved. Operates on per-request copies only.
+    """
+    saved = 0
+    # Find the index boundary — keep last 6 messages verbatim
+    preserve_from = max(0, len(api_messages) - 6)
+    for i in range(preserve_from):
+        msg = api_messages[i]
+        if msg.get("role") != "tool":
+            continue
+        tool_name = msg.get("name", "")
+        if tool_name not in _TERMINAL_TOOL_NAMES:
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str) or len(content) < 2000:
+            continue
+        if _PERSISTED_TAG_RE.search(content):
+            continue
+        lines = content.split("\n")
+        if len(lines) <= _TERMINAL_HEAD_LINES + _TERMINAL_TAIL_LINES:
+            continue
+        head = lines[:_TERMINAL_HEAD_LINES]
+        tail = lines[-_TERMINAL_TAIL_LINES:]
+        hidden = len(lines) - _TERMINAL_HEAD_LINES - _TERMINAL_TAIL_LINES
+        new_content = (
+            "\n".join(head)
+            + f"\n… {hidden} lines hidden …\n"
+            + "\n".join(tail)
+        )
+        saved += len(content) - len(new_content)
+        msg["content"] = new_content
+    return saved
+
+
+_JSON_TRUNCATE_STRING_THRESHOLD = 500
+_JSON_TRUNCATE_STRING_KEEP = 100
+
+
+def _compact_json_aggressive(api_messages: List[Dict[str, Any]]) -> int:
+    """Aggressive JSON compaction: strip null/empty values and truncate long
+    string values in JSON tool results. Unlike _compact_json_tool_output
+    (lossless), this is lossy — only applies to tool results older than the
+    last 6 messages (the model has already seen and processed them).
+
+    Returns chars saved. Protected tools are skipped.
+    Operates on per-request copies only.
+    """
+    saved = 0
+
+    def _truncate_value(v: Any) -> Any:
+        if isinstance(v, str) and len(v) > _JSON_TRUNCATE_STRING_THRESHOLD:
+            return v[:_JSON_TRUNCATE_STRING_KEEP] + "…"
+        if isinstance(v, dict):
+            return {k: _truncate_value(val) for k, val in v.items()
+                    if val is not None and val != "" and val != [] and val != {}}
+        if isinstance(v, list):
+            return [_truncate_value(item) for item in v]
+        return v
+
+    preserve_from = max(0, len(api_messages) - 6)
+    for i in range(preserve_from):
+        msg = api_messages[i]
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str) or len(content) < 200:
+            continue
+        if _PERSISTED_TAG_RE.search(content):
+            continue
+        tool_name = msg.get("name", "")
+        if tool_name in _PROTECTED_TOOLS:
+            continue
+        stripped = content.lstrip()
+        if not stripped or stripped[0] not in "{[":
+            continue
+        try:
+            parsed = json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        compacted = _truncate_value(parsed)
+        result = json.dumps(compacted, separators=(",", ":"), ensure_ascii=False)
+        if len(result) < len(content):
+            saved += len(content) - len(result)
+            msg["content"] = result
+    return saved
+
 
 def _apply_active_turn_redirect(agent: Any, messages: List[Dict[str, Any]], text: str) -> None:
     """Append a provider-safe checkpoint and correction to the live turn.
@@ -1677,6 +2149,23 @@ def run_conversation(
             # Keep 'reasoning_details' - OpenRouter uses this for multi-turn reasoning context
             # The signature field helps maintain reasoning continuity
             api_messages.append(api_msg)
+
+                # Lightweight cleanup — operates on per-request copies only.
+        # Stored history (and prompt-cache prefix) is never mutated.
+        # Each function returns chars saved; convert to tokens once.
+        agent._cleanup_metrics = getattr(agent, '_cleanup_metrics', {}) or {}
+        agent._cleanup_metrics['dedup'] = _dedup_tool_results(api_messages) // 4
+        agent._cleanup_metrics['whitespace'] = _normalize_tool_whitespace(api_messages) // 4
+        agent._cleanup_metrics['json_compact'] = _compact_json_tool_output(api_messages) // 4
+        agent._cleanup_metrics['json_table'] = _compact_json_table(api_messages) // 4
+        agent._cleanup_metrics['repeated_lines'] = _aggregate_repeated_lines(api_messages) // 4
+        agent._cleanup_metrics['reasoning_strip'] = _strip_old_reasoning(api_messages) // 4
+        agent._cleanup_metrics['read_file_dedup'] = _dedup_read_file_results(api_messages) // 4
+        agent._cleanup_metrics['empty_strip'] = _strip_empty_tool_results(api_messages) // 4
+        agent._cleanup_metrics['terminal_truncate'] = _truncate_old_terminal(api_messages) // 4
+        agent._cleanup_metrics['json_aggressive'] = _compact_json_aggressive(api_messages) // 4
+# Expose cleanup metrics for the gateway usage computation.
+        
 
         # Build the final system message: cached prompt + ephemeral system prompt.
         # Ephemeral additions are API-call-time only (not persisted to session DB).

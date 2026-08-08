@@ -236,6 +236,10 @@ COMMAND_REGISTRY: list[CommandDef] = [
                args_hint="[lite|full|ultra|off|status]",
                subcommands=("lite", "full", "ultra", "off", "status"),
                busy_policy="dispatch"),
+    CommandDef("ponytail", "Switch ponytail lazy-code style intensity or turn it off", "Configuration",
+               args_hint="[lite|full|ultra|off|status]",
+               subcommands=("lite", "full", "ultra", "off", "status"),
+               busy_policy="dispatch"),
 
     # Tools & Skills
     CommandDef("tools", "Manage tools: /tools [list|disable|enable] [name...]", "Tools & Skills",

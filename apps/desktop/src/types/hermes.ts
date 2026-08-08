@@ -167,6 +167,7 @@ export interface CustomEndpoint {
   models: string[]
   name: string
   source?: string
+  kind?: string
 }
 
 export interface CustomEndpointsResponse {
@@ -190,6 +191,7 @@ export interface CustomEndpointUpdate {
   model: string
   models?: string[]
   name: string
+  kind?: string
 }
 
 export interface CustomEndpointValidationResponse {
@@ -197,6 +199,29 @@ export interface CustomEndpointValidationResponse {
   models: string[]
   ok: boolean
   reachable: boolean
+}
+
+export interface WebProxyStatus {
+  dir: string
+  install_error: null | string
+  install_status: 'error' | 'idle' | 'installed' | 'installing'
+  installed: boolean
+  port: number
+  provider: string
+  reachable: boolean
+  running: boolean
+}
+
+export interface WebProxyStatusResponse {
+  proxies: WebProxyStatus[]
+}
+
+export interface WebProxyActionResponse {
+  dir?: string
+  message?: string
+  ok: boolean
+  pid?: number
+  provider: string
 }
 
 export interface MessagingEnvVarInfo {
@@ -637,6 +662,8 @@ export interface UsageStats {
   context_percent?: number
   context_used?: number
   cost_usd?: number
+  cost_status?: string
+  cost_source?: string
   input: number
   output: number
   total: number
@@ -647,11 +674,29 @@ export interface UsageStats {
   savings?: number
   /** Breakdown of savings by source, for the footer display. */
   savings_breakdown?: {
-    cache?: number
-    caveman?: number
-    compression?: number
-    ponytail?: number
-  }
+      cache?: number
+      caveman?: number
+      compression?: number
+      ponytail?: number
+      terminal_compression?: number
+      micro_compact?: number
+      cleanup_dedup?: number
+      cleanup_whitespace?: number
+      cleanup_json_compact?: number
+      cleanup_json_table?: number
+      cleanup_repeated_lines?: number
+      cleanup_reasoning_strip?: number
+      cleanup_read_file_dedup?: number
+      cleanup_empty_strip?: number
+      cleanup_terminal_truncate?: number
+      cleanup_json_aggressive?: number
+    }
+  /** Number of context compressions performed. */
+  compressions?: number
+  /** Live count of background/async subagents. */
+  active_subagents?: number
+  /** Current model name. */
+  model?: string
 }
 
 /** One graph node in the star map (learned skill or memory chunk). */

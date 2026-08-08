@@ -643,7 +643,7 @@ class AIAgent:
                     _init_model_config = dict(_init_model_config or {})
                     _init_model_config["yolo_mode"] = True
             except Exception:
-                pass
+                logger.debug("YOLO mode check failed for session %s", self.session_id, exc_info=True)
             self._session_db.create_session(
                 session_id=self.session_id,
                 source=source,
@@ -1600,7 +1600,7 @@ class AIAgent:
             except Exception:
                 # Fall back to the generic GPT-5 rule if Copilot-specific
                 # logic is unavailable for any reason.
-                pass
+                logger.debug("Copilot responses API check failed for %s", model, exc_info=True)
         return AIAgent._model_requires_responses_api(model)
 
     def _max_tokens_param(self, value: int) -> dict:

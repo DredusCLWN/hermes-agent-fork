@@ -60,6 +60,7 @@ class CustomEndpointUpdate(BaseModel):
     discover_models: bool = True
     make_default: bool = False
     models: Optional[List[str]] = None
+    kind: Optional[str] = None
 
 
 class MessagingPlatformUpdate(BaseModel):

@@ -1971,11 +1971,12 @@ def init_agent(
         except (TypeError, ValueError):
             return default
 
-    # Opt-in proactive tool-result prune trigger (0 = disabled — the
-    # default, so an unset key is behavior-neutral).  Negative values are
-    # treated as disabled rather than erroring.
+    # Proactive tool-result prune trigger: when a tool result exceeds this
+    # many tokens, it is proactively pruned (replaced with a summary) before
+    # the compression threshold is reached. Default 8192 — catches large
+    # read_file/terminal outputs early. 0 = disabled. Negative = disabled.
     compression_proactive_prune_tokens = max(
-        0, _parse_prune_int(_compression_cfg.get("proactive_prune_tokens", 0), 0)
+        0, _parse_prune_int(_compression_cfg.get("proactive_prune_tokens", 8192), 8192)
     )
     compression_proactive_prune_min_chars = _parse_prune_int(
         _compression_cfg.get("proactive_prune_min_result_chars", 8000), 8000
@@ -2033,13 +2034,13 @@ def init_agent(
     compression_in_place = is_truthy_value(
         _compression_cfg.get("in_place"), default=True
     )
-    # Opt-in (default False): a micro-compaction pass rewrites already-sent
-    # history every turn, which breaks the provider prompt-cache prefix on a
-    # per-turn cadence rather than at an episodic boundary. That is the cost
-    # `proactive_prune_min_reclaim_tokens` exists to amortize, so the feature
-    # stays off until an operator opts in and accepts the tradeoff.
+    # Micro-compaction rewrites already-sent history on a per-turn cadence,
+    # breaking the provider prompt-cache prefix. Defaulting on with every_n=5
+    # amortizes the cache-break cost: one break per 5 turns, with reclaim
+    # on the 4 turns between. Operators can disable via config if the
+    # cache-break cost outweighs the reclaim for their workload.
     compression_micro_compact = is_truthy_value(
-        _compression_cfg.get("micro_compact"), default=False
+        _compression_cfg.get("micro_compact"), default=True
     )
     # How often a pass runs, in completed turns. Each pass rewrites
     # already-sent history and costs one prompt-cache break, so this is the
@@ -2047,7 +2048,7 @@ def init_agent(
     # reclaim), 5 = one break per five turns. Clamped to >= 1.
     compression_micro_compact_every_n_turns = max(
         1,
-        _parse_prune_int(_compression_cfg.get("micro_compact_every_n_turns", 1), 1),
+        _parse_prune_int(_compression_cfg.get("micro_compact_every_n_turns", 5), 5),
     )
     # Rolling-summary defrag threshold, in tokens. Lived on the compressor as
     # a hardcoded attribute with no path from config until now.

@@ -116,6 +116,21 @@ FOREGROUND_MAX_TIMEOUT = _safe_parse_import_env(
     "integer",
 )
 
+
+def _get_command_timeout_config() -> tuple[int, int]:
+    """Read command_timeout and max_checks from env (bridged from config.yaml).
+
+    Returns (command_timeout, max_checks). Defaults: (120, 5).
+    command_timeout=0 disables timeout monitoring (falls back to env.execute).
+    """
+    cmd_timeout = _safe_parse_import_env(
+        "TERMINAL_COMMAND_TIMEOUT", 120, int, "integer",
+    )
+    max_checks = _safe_parse_import_env(
+        "TERMINAL_COMMAND_TIMEOUT_MAX_CHECKS", 5, int, "integer",
+    )
+    return cmd_timeout, max_checks
+
 # Disk usage warning threshold (in GB)
 DISK_USAGE_WARNING_THRESHOLD_GB = _safe_parse_import_env(
     "TERMINAL_DISK_WARNING_GB",
@@ -2914,6 +2929,75 @@ def terminal_tool(
                 from tools.interrupt import clear_current_thread_interrupt
                 clear_current_thread_interrupt()
 
+            # Command timeout monitoring: for local backend, spawn via
+            # process_registry and wait with command_timeout. If the command
+            # doesn't finish in time, return "running" status with a session_id
+            # so the agent can poll/wait. The process stays alive across
+            # timeout checks (up to command_timeout_max_checks).
+            _cmd_timeout, _max_checks = _get_command_timeout_config()
+            _use_timeout_monitoring = (
+                env_type == "local"
+                and _cmd_timeout > 0
+                and not effective_pty
+            )
+
+            if _use_timeout_monitoring:
+                from tools.process_registry import process_registry as _pr
+                command_cwd = _resolve_command_cwd(
+                    workdir=workdir, default_cwd=cwd, session_key=session_key,
+                )
+                _exec_cmd, _sudo_stdin = env._prepare_command(command)
+                _exec_cmd = _rewrite_compound_background(_exec_cmd)
+                _wrapped = env._wrap_command(_exec_cmd, command_cwd)
+
+                try:
+                    _proc_session = _pr.spawn_local(
+                        command=_wrapped,
+                        cwd=command_cwd,
+                        task_id=effective_task_id,
+                        session_key=session_key,
+                        env_vars=getattr(env, "env", None),
+                    )
+                except Exception as e:
+                    return json.dumps({
+                        "output": "",
+                        "exit_code": -1,
+                        "error": f"Failed to start command: {str(e)}",
+                    }, ensure_ascii=False)
+
+                _proc_session.max_timeout_checks = _max_checks
+                _wait_timeout = timeout or _cmd_timeout
+                _wait_result = _pr.wait(_proc_session.id, timeout=_wait_timeout)
+                _wait_status = _wait_result.get("status")
+
+                if _wait_status == "exited":
+                    _session = _pr.get(_proc_session.id)
+                    _full_output = _session.output_buffer if _session else ""
+                    _rc = _session.exit_code if _session is not None else -1
+                    result = {"output": _full_output, "returncode": _rc}
+                    env._update_cwd(result)
+                    # Skip the retry loop — we have a result
+                    retry_count = max_retries + 1
+                elif _wait_status in ("timeout", "timeout_exceeded"):
+                    _partial = _wait_result.get("output", "")
+                    _result_dict = {
+                        "output": _partial,
+                        "exit_code": None,
+                        "status": _wait_status,
+                        "session_id": _proc_session.id,
+                        "check_number": _wait_result.get("check_number", 1),
+                        "max_checks": _wait_result.get("max_checks", _max_checks),
+                        "error": None,
+                        "timeout_note": _wait_result.get("timeout_note", ""),
+                    }
+                    if approval_note:
+                        _result_dict["approval"] = approval_note
+                    if pty_disabled_reason:
+                        _result_dict["pty_note"] = pty_disabled_reason
+                    return json.dumps(_result_dict, ensure_ascii=False)
+                else:
+                    return json.dumps(_wait_result, ensure_ascii=False)
+
             while retry_count <= max_retries:
                 try:
                     command_cwd = _resolve_command_cwd(
@@ -3037,14 +3121,27 @@ def terminal_tool(
                     pass
 
             if len(output) > MAX_OUTPUT_CHARS:
-                head_chars = int(MAX_OUTPUT_CHARS * 0.4)  # 40% head (error messages often appear early)
-                tail_chars = MAX_OUTPUT_CHARS - head_chars  # 60% tail (most recent/relevant output)
-                omitted = len(output) - head_chars - tail_chars
-                truncated_notice = (
-                    f"\n\n... [OUTPUT TRUNCATED - {omitted} chars omitted "
-                    f"out of {len(output)} total] ...\n\n"
-                )
-                output = output[:head_chars] + truncated_notice + output[-tail_chars:]
+                # Try domain-aware compression first (test/git/ls/build).
+                # Full output is already in the artifact store — this only
+                # affects the visible window the model sees.
+                _domain_compressed = False
+                try:
+                    from tools.terminal_compression import compress_terminal_output
+                    output, _domain_compressed, _domain_chars_saved = compress_terminal_output(
+                        command, output, MAX_OUTPUT_CHARS,
+                    )
+                except Exception:
+                    pass
+
+                if not _domain_compressed:
+                    head_chars = int(MAX_OUTPUT_CHARS * 0.4)  # 40% head (error messages often appear early)
+                    tail_chars = MAX_OUTPUT_CHARS - head_chars  # 60% tail (most recent/relevant output)
+                    omitted = len(output) - head_chars - tail_chars
+                    truncated_notice = (
+                        f"\n\n... [OUTPUT TRUNCATED - {omitted} chars omitted "
+                        f"out of {len(output)} total] ...\n\n"
+                    )
+                    output = output[:head_chars] + truncated_notice + output[-tail_chars:]
 
             # Strip ANSI escape sequences so the model never sees terminal
             # formatting — prevents it from copying escapes into file writes.
@@ -3379,7 +3476,7 @@ TERMINAL_SCHEMA = {
             },
             "timeout": {
                 "type": "integer",
-                "description": f"Max seconds to wait (default: 180, foreground max: {FOREGROUND_MAX_TIMEOUT}). Returns INSTANTLY when command finishes — set high for long tasks, you won't wait unnecessarily. Foreground timeout above {FOREGROUND_MAX_TIMEOUT}s is rejected; use background=true for longer commands.",
+                "description": f"Max seconds to wait (default: 180, foreground max: {FOREGROUND_MAX_TIMEOUT}). Returns INSTANTLY when command finishes — set high for long tasks, you won't wait unnecessarily. Foreground timeout above {FOREGROUND_MAX_TIMEOUT}s is rejected; use background=true for longer commands. On local backend, foreground commands are monitored: if the command runs longer than the configured command_timeout (default 120s, or this timeout if set lower), a partial-output result with status 'running' and a session_id is returned so you can poll/wait/kill. After command_timeout_max_checks (default 5) consecutive timeouts, status becomes 'timeout_exceeded' and you must decide: kill, background, or continue.",
                 "minimum": 1
             },
             "workdir": {

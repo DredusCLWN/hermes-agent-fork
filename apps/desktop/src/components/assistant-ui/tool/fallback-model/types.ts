@@ -51,6 +51,10 @@ export interface ToolView {
   terminalCommand?: string
   /** Terminal-only process exit code, when the backend reported one. */
   terminalExitCode?: number
+  /** Terminal-only: the process is still alive after a partial (timeout)
+   *  result. The tool row keeps its live timer and "Running…" title while
+   *  the backend continues monitoring across timeout checks. */
+  processAlive?: boolean
   /** When set, the renderer uses stdout+stderr as separate sections and
    *  ignores the merged `detail`. */
   stdout?: string

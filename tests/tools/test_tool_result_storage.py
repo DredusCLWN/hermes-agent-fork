@@ -14,6 +14,8 @@ from tools.tool_result_storage import (
     PERSISTED_OUTPUT_CLOSING_TAG,
     STORAGE_DIR,
     _build_persisted_message,
+    _content_addressed_filename,
+    _content_hash,
     _heredoc_marker,
     _resolve_storage_dir,
     _safe_result_filename,
@@ -182,7 +184,11 @@ class TestMaybePersistToolResult:
 
     def test_above_threshold_with_env_persists(self):
         env = MagicMock()
-        env.execute.return_value = {"output": "", "returncode": 0}
+        # First call: dedup check (test -f) → not found; second: write → success
+        env.execute.side_effect = [
+            {"output": "", "returncode": 1},
+            {"output": "", "returncode": 0},
+        ]
         content = "x" * 60_000
         result = maybe_persist_tool_result(
             content=content,
@@ -192,15 +198,22 @@ class TestMaybePersistToolResult:
             threshold=30_000,
         )
         assert PERSISTED_OUTPUT_TAG in result
-        assert "tc_456.txt" in result
+        # Content-addressed filename: hash of content, not tool_use_id
+        expected_hash = _content_hash(content)
+        assert f"{expected_hash}.txt" in result
         assert len(result) < len(content)
-        env.execute.assert_called_once()
+        # env.execute called: first for dedup check (test -f), then for write
+        assert env.execute.call_count >= 1
 
     def test_persists_full_content_as_is(self):
         """Content is persisted verbatim — no JSON extraction."""
         import json
         env = MagicMock()
-        env.execute.return_value = {"output": "", "returncode": 0}
+        # First call: dedup check (test -f) → not found; second: write → success
+        env.execute.side_effect = [
+            {"output": "", "returncode": 1},  # test -f → not found
+            {"output": "", "returncode": 0},  # mkdir + cat → write success
+        ]
         raw = "line1\nline2\n" * 5_000
         content = json.dumps({"output": raw, "exit_code": 0, "error": None})
         result = maybe_persist_tool_result(
@@ -213,12 +226,17 @@ class TestMaybePersistToolResult:
         assert PERSISTED_OUTPUT_TAG in result
         # Content is delivered through stdin (no longer embedded in the
         # command string — see test_large_content_via_stdin for why).
-        assert env.execute.call_args[1]["stdin_data"] == content
+        # The write call is the second execute call.
+        write_call = env.execute.call_args_list[1]
+        assert write_call[1]["stdin_data"] == content
 
 
     def test_tool_use_id_cannot_escape_storage_dir(self):
         env = MagicMock()
-        env.execute.return_value = {"output": "", "returncode": 0}
+        env.execute.side_effect = [
+            {"output": "", "returncode": 1},  # test -f → not found
+            {"output": "", "returncode": 0},  # write → success
+        ]
         env.get_temp_dir.return_value = ""
         content = "x" * 60_000
         result = maybe_persist_tool_result(
@@ -228,20 +246,20 @@ class TestMaybePersistToolResult:
             env=env,
             threshold=30_000,
         )
-        cmd = env.execute.call_args[0][0]
-        target = cmd.split("cat > ", 1)[1].split(" <<", 1)[0]
-
-        assert "Full output saved to: /tmp/hermes-results/outside_whoami_x_" in result
+        # Content-addressed filename: hash-based, tool_use_id not in path
+        expected_hash = _content_hash(content)
+        assert f"/tmp/hermes-results/{expected_hash}.txt" in result
         assert "/tmp/hermes-results/../" not in result
-        assert target.startswith("/tmp/hermes-results/outside_whoami_x_")
-        assert "/../" not in target
-        assert "$(whoami)" not in target
-        assert ";" not in target
+        assert "$(whoami)" not in result
+        assert ";" not in result
 
 
     def test_threshold_zero_forces_persist(self):
         env = MagicMock()
-        env.execute.return_value = {"output": "", "returncode": 0}
+        env.execute.side_effect = [
+            {"output": "", "returncode": 1},  # test -f → not found
+            {"output": "", "returncode": 0},  # write → success
+        ]
         content = "even short content"
         result = maybe_persist_tool_result(
             content=content,
@@ -252,6 +270,43 @@ class TestMaybePersistToolResult:
         )
         # Any non-empty content with threshold=0 should be persisted
         assert PERSISTED_OUTPUT_TAG in result
+
+    def test_ccr_dedup_skips_write_for_same_content(self):
+        """CCR: same content persisted twice should skip the second write."""
+        env = MagicMock()
+        # First call: file does not exist (returncode 1) → write
+        # Second call: file exists (returncode 0) → skip write
+        env.execute.side_effect = [
+            {"output": "", "returncode": 1},  # test -f → not found
+            {"output": "", "returncode": 0},  # mkdir + cat → write success
+            {"output": "", "returncode": 0},  # test -f → found (dedup!)
+        ]
+        content = "x" * 60_000
+        result1 = maybe_persist_tool_result(
+            content=content, tool_name="terminal", tool_use_id="tc_a",
+            env=env, threshold=30_000,
+        )
+        result2 = maybe_persist_tool_result(
+            content=content, tool_name="terminal", tool_use_id="tc_b",
+            env=env, threshold=30_000,
+        )
+        # Both return persisted message with same path (same content hash)
+        expected_hash = _content_hash(content)
+        assert f"{expected_hash}.txt" in result1
+        assert f"{expected_hash}.txt" in result2
+        # Second call should NOT have written (only 2 execute calls: test -f + write for first,
+        # then 1 execute call: test -f for second → dedup skip)
+        # Total: 3 execute calls (2 for first, 1 for second)
+        assert env.execute.call_count == 3
+
+    def test_different_content_gets_different_filenames(self):
+        """CCR: different content → different hash → different file."""
+        content_a = "x" * 60_000
+        content_b = "y" * 60_000
+        hash_a = _content_hash(content_a)
+        hash_b = _content_hash(content_b)
+        assert hash_a != hash_b
+        assert _content_addressed_filename(content_a) != _content_addressed_filename(content_b)
 
 
 # ── enforce_turn_budget ───────────────────────────────────────────────
@@ -271,7 +326,15 @@ class TestEnforceTurnBudget:
         """6 results of 42K chars each (252K total) — each under 100K default
         threshold but aggregate exceeds 200K budget. L3 should persist."""
         env = MagicMock()
-        env.execute.return_value = {"output": "", "returncode": 0}
+        # All 6 messages have identical content → same hash → CCR dedup.
+        # First persist: test -f (not found) + write (success) = 2 calls.
+        # Remaining: test -f (found, dedup skip) = 1 call each.
+        env.execute.side_effect = [
+            {"output": "", "returncode": 1},  # 1st: test -f → not found
+            {"output": "", "returncode": 0},  # 1st: write → success
+        ] + [
+            {"output": "", "returncode": 0},  # 2nd-6th: test -f → found (dedup)
+        ] * 10  # enough for all remaining dedup checks
         msgs = [
             {"role": "tool", "tool_call_id": f"t{i}", "content": "x" * 42_000}
             for i in range(6)

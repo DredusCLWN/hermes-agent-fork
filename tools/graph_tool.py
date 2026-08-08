@@ -67,7 +67,7 @@ def _run_graphify_cli(args: list[str], timeout: int = 60) -> Dict[str, Any]:
     We return the raw text capped at 8000 chars so the model can read it.
     """
     if not _ensure_graphify():
-        return {"error": "graphify package not installed. Run: pip install graphify"}
+        return {"error": "graphifyy package not installed. Run: pip install graphifyy"}
 
     # Resolve cwd from metadata so CLI runs in the project directory
     cwd: Optional[str] = None

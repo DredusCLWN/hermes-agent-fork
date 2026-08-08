@@ -45,6 +45,20 @@ _UNSAFE_RESULT_FILENAME_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 _MAX_RESULT_FILENAME_STEM = 120
 
 
+def _content_hash(content: str) -> str:
+    """Return a short SHA-256 hash of content for content-addressed storage."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+
+def _content_addressed_filename(content: str) -> str:
+    """Return a content-addressed filename for CCR deduplication.
+
+    Same content → same filename → natural dedup on disk.
+    Different content → different filename → no collision.
+    """
+    return f"{_content_hash(content)}.txt"
+
+
 def _resolve_storage_dir(env) -> str:
     """Return the best temp-backed storage dir for this environment."""
     if env is not None:
@@ -175,11 +189,19 @@ def maybe_persist_tool_result(
         return content
 
     storage_dir = _resolve_storage_dir(env)
-    remote_path = f"{storage_dir}/{_safe_result_filename(tool_use_id)}"
+    remote_path = f"{storage_dir}/{_content_addressed_filename(content)}"
     preview, has_more = generate_preview(content, max_chars=config.preview_size)
 
     if env is not None:
         try:
+            # CCR dedup: skip write if file already exists (same content → same hash → same path)
+            check = env.execute(f"test -f {shlex.quote(remote_path)}", timeout=5)
+            if check.get("returncode") == 0:
+                logger.info(
+                    "CCR dedup: tool result already persisted at %s (%s, %d chars)",
+                    remote_path, tool_use_id, len(content),
+                )
+                return _build_persisted_message(preview, has_more, len(content), remote_path)
             if _write_to_sandbox(content, remote_path, env):
                 logger.info(
                     "Persisted large tool result: %s (%s, %d chars -> %s)",

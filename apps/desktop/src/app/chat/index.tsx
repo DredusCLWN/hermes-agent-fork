@@ -1,7 +1,7 @@
 import { type AppendMessage, AssistantRuntimeProvider, type ThreadMessage } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
 import { useQuery } from '@tanstack/react-query'
-import type { ReadableAtom } from 'nanostores'
+import { type ReadableAtom, computed } from 'nanostores'
 import type * as React from 'react'
 import { memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router'
@@ -32,7 +32,7 @@ import {
   $gatewayState,
   $introPersonality,
   $introSeed,
-  $resumeExhaustedSessionId,
+    $resumeExhaustedSessionId,
   $sessions,
   resolveComposerSessionKey,
   sessionMatchesStoredId,
@@ -66,7 +66,8 @@ interface ChatViewProps extends Omit<React.ComponentProps<'div'>, 'onSubmit'> {
   modelMenuContent?: React.ReactNode
   onToggleSelectedPin: () => void
   onDeleteSelectedSession: () => void
-  onCancel: () => Promise<void> | void
+    onCancel: () => Promise<void> | void
+    onTransfer?: () => Promise<string | null | void> | void
   onAddContextRef: (refText: string, label?: string, detail?: string) => void
   onAddUrl: (url: string) => void
   onBranchInNewChat?: (messageId: string) => void
@@ -264,8 +265,9 @@ export const ChatView = memo(function ChatView({
   onRestoreToMessage,
   onRetryResume,
   onTranscribeAudio,
-  onDismissError
-}: ChatViewProps) {
+    onDismissError,
+    onTransfer
+  }: ChatViewProps) {
   const location = useLocation()
   const { t } = useI18n()
   // The view this surface renders: the primary route-driven session (global
@@ -302,6 +304,21 @@ export const ChatView = memo(function ChatView({
   const messagesEmpty = useStore(view.$messagesEmpty)
   const lastVisibleIsUser = useStore(view.$lastVisibleIsUser)
   const selectedSessionId = useStore(view.$storedId)
+
+  // "Transfer to session": the disconnect is exactly the counter the user
+  // asked for (>=20 user messages). The action itself lives in the session
+  // controller (transferToNewSession) and arrives via the onTransfer prop;
+  // this view only decides whether the button is worth showing.
+  // Read from view.$messages (per-session slice) not the global $messages atom
+  // — a tile's messages live in its slice, and the global atom tracks the
+  // primary draft only. A computed atom caches the count so ChatView only
+  // re-renders when the count changes, not on every streaming delta.
+  const $userTurnCount = useMemo(
+    () => computed(view.$messages, msgs => msgs.filter(m => m.role === 'user').length),
+    [view.$messages]
+  )
+  const userTurnCount = useStore($userTurnCount)
+  const transferReady = typeof onTransfer === 'function' && userTurnCount >= 20
   const sessions = useStore($sessions)
   const resumeExhaustedSessionId = useStore($resumeExhaustedSessionId)
 
@@ -577,8 +594,13 @@ export const ChatView = memo(function ChatView({
               onTranscribeAudio={onTranscribeAudio}
               queueSessionKey={queueSessionKey}
               sessionId={activeSessionId}
-              state={chatBarState}
-            />
+                            state={chatBarState}
+                            transfer={{
+                              can: transferReady,
+                              busy: busy,
+                              onTransfer: onTransfer ?? (() => {})
+                            }}
+                          />
           </Suspense>
         )}
       </ChatRuntimeBoundary>

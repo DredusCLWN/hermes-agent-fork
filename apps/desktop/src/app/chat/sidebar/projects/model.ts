@@ -53,17 +53,9 @@ const homeFirst = (projects: SidebarProjectTree[]): SidebarProjectTree[] =>
     : [...projects.filter(project => project.isNoProject), ...projects.filter(project => !project.isNoProject)]
 
 export function sortProjectsForOverview(
-  projects: SidebarProjectTree[],
-  activeProjectId: null | string
+  projects: SidebarProjectTree[]
 ): SidebarProjectTree[] {
   const sorted = [...projects].sort((a, b) => {
-    const aActive = Boolean(activeProjectId && a.id === activeProjectId && !a.isAuto)
-    const bActive = Boolean(activeProjectId && b.id === activeProjectId && !b.isAuto)
-
-    if (aActive !== bActive) {
-      return aActive ? -1 : 1
-    }
-
     if (!a.isAuto !== !b.isAuto) {
       return a.isAuto ? 1 : -1
     }

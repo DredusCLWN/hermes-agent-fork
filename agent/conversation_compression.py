@@ -3467,6 +3467,12 @@ def compress_context(
             tools=agent.tools or None,
         )
         agent.context_compressor.last_compression_rough_tokens = _compressed_est
+        # Accumulate cumulative compression savings (pre - post rough estimate).
+        # Uses threshold_tokens as pre-compression proxy (compression triggers
+        # when prompt reaches threshold) and _compressed_est as post.
+        _pre_est = getattr(agent.context_compressor, "threshold_tokens", 0) or 0
+        if _pre_est and _compressed_est < _pre_est:
+            agent.context_compressor._compression_tokens_saved_total += (_pre_est - _compressed_est)
         agent.context_compressor.last_prompt_tokens = -1
         agent.context_compressor.last_completion_tokens = 0
         agent.context_compressor.awaiting_real_usage_after_compression = True

@@ -126,7 +126,13 @@ export function openSession(
   // otherwise load it into main. From a full page (artifacts, skills, …) a
   // `'main'` hit still has to route back: fronting the workspace tab alone
   // leaves the page showing.
-  if (focusedSessionNeedsRoute(focusOpenSession(storedSessionId), $workspaceIsPage.get())) {
+  const focusResult = focusOpenSession(storedSessionId)
+  const needsRoute = focusedSessionNeedsRoute(focusResult, $workspaceIsPage.get())
+  // For in-place (sidebar click) on a tile, always navigate so the session
+  // loads in main chat — the user expects the clicked session to appear in
+  // the main area, not just focus a side pane. resumeSession closes the tile.
+  const forceRoute = resolved === 'in-place' && focusResult === 'tile'
+  if (needsRoute || forceRoute) {
     navigate(sessionRoute(storedSessionId))
   }
 }

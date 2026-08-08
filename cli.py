@@ -161,7 +161,7 @@ def _reverse_alias_for_display(model_name: str) -> str:
                             if m and (m not in rmap or len(alias) < len(rmap[m])):
                                 rmap[m] = alias
         except Exception:
-            pass
+            logger.debug("reverse alias cache build failed", exc_info=True)
         _REVERSE_ALIAS_CACHE = rmap
     return _REVERSE_ALIAS_CACHE.get(model_name, model_name)
 
@@ -798,21 +798,21 @@ try:
     from hermes_logging import setup_logging
     setup_logging(mode="cli")
 except Exception:
-    pass  # Logging setup is best-effort — don't crash the CLI
+    logger.debug("logging setup failed", exc_info=True)  # Logging setup is best-effort — don't crash the CLI
 
 # Validate config structure early — print warnings before user hits cryptic errors
 try:
     from hermes_cli.config import print_config_warnings
     print_config_warnings()
 except Exception:
-    pass
+    logger.debug("config warnings print failed", exc_info=True)
 
 # Initialize the skin engine from config
 try:
     from hermes_cli.skin_engine import init_skin_from_config
     init_skin_from_config(CLI_CONFIG)
 except Exception:
-    pass  # Skin engine is optional — default skin used if unavailable
+    logger.debug("skin engine init failed", exc_info=True)  # Skin engine is optional — default skin used if unavailable
 
 # Initialize tool preview length from config
 try:
@@ -820,7 +820,7 @@ try:
     _tpl = CLI_CONFIG.get("display", {}).get("tool_preview_length", 0)
     set_tool_preview_max_len(int(_tpl) if _tpl else 0)
 except Exception:
-    pass
+    logger.debug("tool preview length init failed", exc_info=True)
 
 # Initialize friendly tool labels from config (default on)
 try:
@@ -828,7 +828,7 @@ try:
     _ftl = CLI_CONFIG.get("display", {}).get("friendly_tool_labels", True)
     set_friendly_tool_labels(bool(_ftl))
 except Exception:
-    pass
+    logger.debug("friendly tool labels init failed", exc_info=True)
 
 # Neuter AsyncHttpxClientWrapper.__del__ before any AsyncOpenAI clients are
 # created.  The SDK's __del__ schedules aclose() on asyncio.get_running_loop()

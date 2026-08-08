@@ -200,29 +200,40 @@ def _collect_delegate_child_ids(conn, parent_ids: List[str]) -> List[str]:
     backfilled by the v16 migration) — generic untagged children keep the
     orphan-don't-delete contract. Walks marker chains recursively so an
     orchestrator subagent's own delegate children go too (FK safety).
+
+    Uses an iterative BFS loop in Python instead of a recursive CTE.
+    SQLite only allows ONE reference to the recursive CTE name in the
+    recursive part; the cycle-breaking ``NOT IN (SELECT ... FROM cte)``
+    subquery adds a second reference, which raises
+    "multiple recursive references: delegate_tree" on SQLite < 3.40.
     """
     df = _delegate_from_json()
-    seeds = {sid for sid in parent_ids if sid}
-    # Seed the visited set with the parents themselves. A delegation marker
-    # chain can loop back onto a parent — a cycle, or a parent that is also
-    # another parent's delegate child when several ids are deleted at once —
-    # and without this guard that parent would be collected as one of its own
-    # descendants and cascade-deleted along with all of its messages. Callers
-    # delete the parents separately, so parents must never appear in the
-    # returned child set. (#49148)
-    found: set[str] = set(seeds)
+    seeds = [sid for sid in parent_ids if sid]
+    if not seeds:
+        return []
+
+    result: List[str] = []
+    visited: set = set()
     frontier = list(seeds)
+
     while frontier:
         ph = ",".join("?" * len(frontier))
         cursor = conn.execute(
-            f"SELECT id FROM sessions WHERE {df} IN ({ph}) "
+            f"SELECT id FROM sessions "
+            f"WHERE {df} IN ({ph}) "
             f"OR (parent_session_id IN ({ph}) AND {df} IS NOT NULL)",
             frontier + frontier,
         )
-        frontier = [row["id"] for row in cursor.fetchall() if row["id"] not in found]
-        found.update(frontier)
-    # Return only the discovered children — never the parents themselves.
-    return [sid for sid in found if sid not in seeds]
+        next_frontier: List[str] = []
+        for row in cursor.fetchall():
+            sid = row["id"]
+            if sid not in visited and sid not in seeds:
+                visited.add(sid)
+                next_frontier.append(sid)
+                result.append(sid)
+        frontier = next_frontier
+
+    return result
 
 
 def _delete_delegate_children(conn, parent_ids: List[str]) -> List[str]:
@@ -481,7 +492,7 @@ def _apply_macos_checkpoint_barrier(conn: sqlite3.Connection) -> None:
     try:
         conn.execute("PRAGMA checkpoint_fullfsync=1")
     except sqlite3.OperationalError:
-        pass
+        logger.debug("PRAGMA checkpoint_fullfsync failed", exc_info=True)
 
 
 def _enforce_macos_synchronous_full(conn: sqlite3.Connection) -> None:
@@ -511,7 +522,7 @@ def _enforce_macos_synchronous_full(conn: sqlite3.Connection) -> None:
     try:
         conn.execute("PRAGMA synchronous=FULL")
     except sqlite3.OperationalError:
-        pass
+        logger.debug("PRAGMA synchronous=FULL failed", exc_info=True)
 
 
 def is_sqlite_wal_reset_vulnerable(
@@ -660,7 +671,7 @@ def apply_wal_with_fallback(
             _enforce_macos_synchronous_full(conn)
             return "wal"
     except sqlite3.OperationalError:
-        pass
+        logger.debug("macOS WAL pre-check failed", exc_info=True)
 
     # #68545: honor the canonical database.journal_mode setting. Existing
     # on-disk WAL databases were returned above and are never live-downgraded.
@@ -914,7 +925,7 @@ def apply_database_pragmas(
         try:
             conn.execute(f"PRAGMA {pragma_name}={value}")
         except sqlite3.OperationalError:
-            pass
+            logger.debug("PRAGMA %s=%s failed", pragma_name, value, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

@@ -252,42 +252,66 @@ def _run_build(cwd: str, task_id: str, mode: str = "ast", backend: str = "", mod
         proc = subprocess.Popen(
             cmd,
             cwd=cwd,
-            stdout=subprocess.PIPE,
+            # Read only graph.json at the end; never let stdout accumulate in
+            # a pipe. The old code streamed stderr alone then read stdout, so
+            # graphify writing >~64KB to stdout would fill the buffer, block
+            # the child, and hold this thread in "building" forever.
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
         )
         with _build_lock:
             _build_proc = proc
 
-        # Stream stderr to track progress and capture warnings.
-        # graphify logs progress lines like "[graphify] chunk 3/10 ..."
-        build_warnings = ""
+        # Stream stderr in a helper thread (progress + warnings) while this
+        # thread waits with a hard timeout. The old single-threaded loop had
+        # NO timeout of its own, so a child that just blocked mid-write (no
+        # stderr, no exit) never got reaped either.
         warning_lines: list[str] = []
-        assert proc.stderr is not None
-        for line in proc.stderr:
-            line_s = line.rstrip()
-            if not line_s:
-                continue
-            if line_s.strip().startswith("[graphify]"):
-                warning_lines.append(line_s)
-                # Try to parse progress from "chunk N/M" patterns
-                m = re.search(r'chunk\s+(\d+)\s*/\s*(\d+)', line_s, re.IGNORECASE)
-                if m:
-                    cur_chunk = int(m.group(1))
-                    total_chunks = int(m.group(2))
-                    pct = min(90.0, (cur_chunk / max(total_chunks, 1)) * 90.0)
-                    with _build_lock:
-                        _build_state["progress"] = pct
-                m2 = re.search(r'(\d+)\s*/\s*(\d+)\s+dispatched', line_s, re.IGNORECASE)
-                if m2:
-                    cur_file = int(m2.group(1))
-                    total_files = int(m2.group(2))
-                    pct = min(90.0, (cur_file / max(total_files, 1)) * 90.0)
-                    with _build_lock:
-                        _build_state["progress"] = pct
+        _stop_reader = threading.Event()
 
-        proc.wait(timeout=_BUILD_TIMEOUT_SECONDS)
-        stdout_data = proc.stdout.read() if proc.stdout else ""
+        def _stderr_reader() -> None:
+            assert proc.stderr is not None
+            for line in proc.stderr:
+                if _stop_reader.is_set():
+                    break
+                line_s = line.rstrip()
+                if not line_s:
+                    continue
+                if line_s.strip().startswith("[graphify]"):
+                    warning_lines.append(line_s)
+                    # Try to parse progress from "chunk N/M" patterns
+                    m = re.search(r'chunk\s+(\d+)\s*/\s*(\d+)', line_s, re.IGNORECASE)
+                    if m:
+                        cur_chunk = int(m.group(1))
+                        total_chunks = int(m.group(2))
+                        pct = min(90.0, (cur_chunk / max(total_chunks, 1)) * 90.0)
+                        with _build_lock:
+                            _build_state["progress"] = pct
+                    m2 = re.search(r'(\d+)\s*/\s*(\d+)\s+dispatched', line_s, re.IGNORECASE)
+                    if m2:
+                        cur_file = int(m2.group(1))
+                        total_files = int(m2.group(2))
+                        pct = min(90.0, (cur_file / max(total_files, 1)) * 90.0)
+                        with _build_lock:
+                            _build_state["progress"] = pct
+
+        _reader = threading.Thread(target=_stderr_reader, name="graphify-stderr", daemon=True)
+        _reader.start()
+        try:
+            proc.wait(timeout=_BUILD_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            _stop_reader.set()
+            _reader.join(timeout=2)
+            with _build_lock:
+                _build_proc = None
+            raise
+        _stop_reader.set()
+        _reader.join(timeout=2)
         returncode = proc.returncode
         with _build_lock:
             _build_proc = None

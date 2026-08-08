@@ -39,12 +39,17 @@ export interface GraphNode {
   id: string
   label?: string
   type?: string
+  /** Backend (graphify AST) field name for `type`; normalized away on load. */
+  file_type?: string
   file?: string
+  /** Backend field name for `file`; normalized away on load. */
+  source_file?: string
   community?: number
   cluster?: number
   community_label?: string
   degree_centrality?: number
   betweenness_centrality?: number
+  /** Local degree, computed by the renderer from the visible link set. */
   degree?: number
 }
 

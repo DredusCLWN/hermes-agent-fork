@@ -50,6 +50,7 @@ export type ChatActions = Pick<
   | 'onThreadMessagesChange'
   | 'onToggleSelectedPin'
   | 'onTranscribeAudio'
+  | 'onTransfer'
 >
 
 /**

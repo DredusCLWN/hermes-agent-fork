@@ -92,8 +92,9 @@ export function ChatBar({
   onPickImages,
   onRemoveAttachment,
   onSteer,
-  onSubmit: onSubmitProp
-}: ChatBarProps) {
+    onSubmit: onSubmitProp,
+    transfer
+  }: ChatBarProps) {
   // Every send (typed, queued, voice) passes through the contributed
   // middleware chain first — rewrite / pass-through / cancel. Empty chain =
   // exact pass-through, so surfaces without contributions are byte-identical.
@@ -861,9 +862,10 @@ export function ChatBar({
       compactModelPill={poppedOut || compactPill}
       disabled={disabled}
       onQueue={queueDraft}
-      state={state}
-    />
-  )
+            state={state}
+            transfer={transfer}
+          />
+        )
 
   const input = (
     <div className={cn('relative', stacked ? 'w-full' : 'min-w-(--composer-input-inline-min-width) flex-1')}>

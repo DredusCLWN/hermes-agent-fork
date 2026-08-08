@@ -655,7 +655,18 @@ async def delete_session_endpoint(session_id: str, profile: Optional[str] = None
         finally:
             db.close()
 
-    return await asyncio.to_thread(_delete)
+    try:
+        return await asyncio.to_thread(_delete)
+    except Exception as exc:
+        import sqlite3
+
+        if isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower():
+            raise HTTPException(
+                status_code=503,
+                detail="Database is locked — another process is writing. Try again in a moment.",
+            )
+        _log.warning("delete_session_endpoint failed", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @manage_router.patch("/api/sessions/{session_id}")

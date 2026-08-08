@@ -783,9 +783,48 @@ def _sort_skills(skills: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(skills, key=lambda s: (s.get("category") or "", s["name"]))
 
 
-def skills_list(category: str = None, task_id: str = None) -> str:
+def _filter_skills_by_query(
+    skills: List[Dict[str, Any]], query: str
+) -> List[Dict[str, Any]]:
+    """Filter skills by fuzzy matching query against name + description.
+
+    Scoring: substring match in name (highest), then word overlap between
+    query tokens and name+description tokens. Returns skills sorted by
+    score descending. Skills with zero overlap are excluded.
     """
-    List all available skills (progressive disclosure tier 1 - minimal metadata).
+    query_lower = query.lower().strip()
+    if not query_lower:
+        return skills
+    query_tokens = set(query_lower.split())
+
+    scored: list[tuple[float, Dict[str, Any]]] = []
+    for skill in skills:
+        name = (skill.get("name") or "").lower()
+        desc = (skill.get("description") or "").lower()
+        haystack = f"{name} {desc}"
+        score = 0.0
+
+        # Substring match in name — strong signal
+        if query_lower in name:
+            score += 3.0
+        # Substring match in description
+        if query_lower in desc:
+            score += 1.0
+        # Word overlap
+        hay_tokens = set(haystack.split())
+        overlap = query_tokens & hay_tokens
+        score += len(overlap) * 0.5
+
+        if score > 0:
+            scored.append((score, skill))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [s for _, s in scored]
+
+
+def skills_list(category: str = None, task_id: str = None, query: str = None) -> str:
+    """
+    List available skills (progressive disclosure tier 1 - minimal metadata).
 
     Returns only name + description to minimize token usage. Use skill_view() to
     load full content, tags, related files, etc.
@@ -793,6 +832,10 @@ def skills_list(category: str = None, task_id: str = None) -> str:
     Args:
         category: Optional category filter (e.g., "mlops")
         task_id: Optional task identifier used to probe the active backend
+        query: Optional search query — filters skills by fuzzy matching name
+            and description (case-insensitive substring + word overlap).
+            Use this to find skills relevant to the current task instead of
+            listing all skills.
 
     Returns:
         JSON string with minimal skill info: name, description, category
@@ -828,6 +871,10 @@ def skills_list(category: str = None, task_id: str = None) -> str:
         # Filter by category if specified
         if category:
             all_skills = [s for s in all_skills if s.get("category") == category]
+
+        # Filter by query (fuzzy match on name + description)
+        if query:
+            all_skills = _filter_skills_by_query(all_skills, query)
 
         # Sort by category then name
         all_skills = _sort_skills(all_skills)
@@ -1758,13 +1805,17 @@ if __name__ == "__main__":
 
 SKILLS_LIST_SCHEMA = {
     "name": "skills_list",
-    "description": "List available skills (name + description). Use skill_view(name) to load full content.",
+    "description": "List available skills (name + description). Use skill_view(name) to load full content. Pass query to find skills relevant to a task.",
     "parameters": {
         "type": "object",
         "properties": {
             "category": {
                 "type": "string",
                 "description": "Optional category filter to narrow results",
+            },
+            "query": {
+                "type": "string",
+                "description": "Search query to find relevant skills by name/description (e.g. 'docker deployment', 'code review', 'git rebase'). Use this instead of listing all skills when you need something specific.",
             }
         },
         "required": [],
@@ -1795,7 +1846,7 @@ registry.register(
     toolset="skills",
     schema=SKILLS_LIST_SCHEMA,
     handler=lambda args, **kw: skills_list(
-        category=args.get("category"), task_id=kw.get("task_id")
+        category=args.get("category"), task_id=kw.get("task_id"), query=args.get("query")
     ),
     check_fn=check_skills_requirements,
     emoji="📚",

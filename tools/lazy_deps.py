@@ -313,7 +313,7 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     "tool.trace_upload": ("huggingface-hub==1.24.0",),
     # Code graph — tree-sitter AST dependency graph builder.
     # Lazy-installed on first /build or graph_query call.
-    "tool.graphify": ("graphify>=0.9,<1.0",),
+    "tool.graphify": ("graphifyy>=0.9,<1.0",),
 }
 
 

@@ -138,6 +138,12 @@ class ProcessSession:
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _reader_thread: Optional[threading.Thread] = field(default=None, repr=False)
     _pty: Any = field(default=None, repr=False)  # ptyprocess handle (when use_pty=True)
+    # Command timeout check tracking: when a foreground command times out
+    # (command_timeout), the tool returns "running" status and the agent
+    # can poll/wait again. After max_timeout_checks consecutive timeouts,
+    # the tool returns "timeout_exceeded" so the agent must take action.
+    _timeout_check_count: int = field(default=0, repr=False)
+    max_timeout_checks: int = 0  # 0 = no limit (background processes don't use this)
 
 
 class ProcessRegistry:
@@ -1620,6 +1626,27 @@ class ProcessRegistry:
                 " Poll again later or use terminal(background=true, "
                 "notify_on_complete=true) next time for automatic notification."
             )
+        # Command timeout check tracking: when max_timeout_checks is set
+        # (foreground command being monitored via command_timeout), increment
+        # the check counter and surface it to the agent. After the limit is
+        # reached, escalate to "timeout_exceeded" so the agent must act.
+        if session.max_timeout_checks > 0:
+            session._timeout_check_count += 1
+            check_num = session._timeout_check_count
+            result["check_number"] = check_num
+            result["max_checks"] = session.max_timeout_checks
+            if check_num >= session.max_timeout_checks:
+                result["status"] = "timeout_exceeded"
+                base_note = (
+                    f"Command has been running for {int(uptime)}s across "
+                    f"{check_num} timeout checks (max: {session.max_timeout_checks}). "
+                    "You must decide: kill the process (process action='kill'), "
+                    "leave it running in the background, or take other action."
+                )
+            else:
+                base_note += (
+                    f" Timeout check {check_num}/{session.max_timeout_checks}."
+                )
         if timeout_note:
             result["timeout_note"] = f"{timeout_note}. {base_note}"
         else:

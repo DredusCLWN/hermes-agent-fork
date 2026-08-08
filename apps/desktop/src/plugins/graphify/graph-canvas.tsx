@@ -119,7 +119,22 @@ export function GraphCanvas() {
   const loadGraph = useCallback(async () => {
     try {
       const data = await fetchGraph(500)
-      setNodes(data.nodes || [])
+      const rawNodes = data.nodes || []
+      // The backend returns raw graphify nodes keyed file_type/source_file.
+      // Normalize to the shape the UI reads (type/file/degree) so tooltips,
+      // node sizes and the inspector show real values instead of blanks.
+      const degreeByNode = new Map<string, number>()
+      for (const l of data.links || []) {
+        degreeByNode.set(l.source, (degreeByNode.get(l.source) ?? 0) + 1)
+        degreeByNode.set(l.target, (degreeByNode.get(l.target) ?? 0) + 1)
+      }
+      const normNodes = rawNodes.map((n: GraphNode) => ({
+        ...n,
+        type: n.type ?? n.file_type,
+        file: n.file ?? n.source_file,
+        degree: degreeByNode.get(n.id) ?? 0,
+      }))
+      setNodes(normNodes)
       setLinks(data.links || [])
     } catch {}
   }, [])
@@ -212,6 +227,10 @@ export function GraphCanvas() {
     if ((window as any).vis?.Network) {
       initNetwork()
     } else {
+      // TODO(bundling): vis-network is not an app dependency, so it's pulled at
+      // runtime from unpkg unpinned (latest) — a supply-chain and offline risk.
+      // Once `npm i vis-network` + a bundled import are in, delete this whole
+      // script-injection branch; keep the `window.vis` fast-path above.
       const script = document.createElement('script')
       script.src = 'https://unpkg.com/vis-network/standalone/umd/vis-network.min.js'
       script.onload = initNetwork
@@ -239,6 +258,14 @@ export function GraphCanvas() {
     if (!nodesDataSetRef.current || !edgesDataSetRef.current || nodes.length === 0) return
     const tc = themeColorsRef.current
     if (!tc) return
+
+    // Stop any in-flight batch from a previous run (e.g. a rebuild that fired
+    // while this data was still streaming) so stale nodes can't land in the
+    // freshly-cleared DataSet.
+    if (renderTimerRef.current) {
+      clearTimeout(renderTimerRef.current)
+      renderTimerRef.current = null
+    }
 
     // Clear previous data
     nodesDataSetRef.current.clear()
@@ -311,7 +338,7 @@ export function GraphCanvas() {
   const handleBuild = () => {
     const payload: Record<string, string> = { mode: 'ast', backend }
     if (modelName) payload.model = modelName
-    if (activeCwd) payload.cwd = activeCwd
+    if (effectiveCwd) payload.cwd = effectiveCwd
     setStatus(prev => ({ ...prev, status: 'building', progress: 0, error: null }))
     buildGraph(payload).catch(() => {})
   }
@@ -364,9 +391,9 @@ export function GraphCanvas() {
       <div className="flex items-center justify-between">
         <div className="min-w-0">
           <h2 className="text-lg font-bold tracking-wide">Code Graph</h2>
-          {activeCwd && (
+          {effectiveCwd && (
             <div className="truncate text-xs" style={{ color: 'var(--ui-text-quaternary)', maxWidth: '400px' }}>
-              {activeCwd}
+              {effectiveCwd}
             </div>
           )}
         </div>
@@ -402,12 +429,12 @@ export function GraphCanvas() {
                 <Codicon name="refresh" />
                 Rebuild
               </Button>
-              {isReady && (
+              {isReady && modelsLive && !!modelName && (
                 <Button
                   onClick={handleEnhance}
                   variant="ghost"
                   size="sm"
-                  title="Enhance graph with local LLM"
+                  title="Enhance graph with local LLM (Ollama)"
                 >
                   <Codicon name="sparkle" />
                   Enhance

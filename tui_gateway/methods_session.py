@@ -159,6 +159,74 @@ def _(rid, params: dict) -> dict:
     )
 
 
+@method("session.transfer")
+def _(rid, params: dict) -> dict:
+    """Prepare a seamless continuation context for "Transfer to new session".
+
+    Reads the current session's transcript, splits it into a summarized head
+    and a verbatim tail, and returns a seed message list plus the source id.
+    The client then calls ``session.create(messages=<seed>, parent_session_id=<src>)``
+    to build a continuation branch that keeps the same project / model / cwd,
+    so the new session never reads as a cold start. Summary is best-effort
+    (aux lane); on failure we fall back to the tail verbatim.
+    """
+    import asyncio
+    import concurrent.futures
+
+    from .transfer import (
+        DEFAULT_TAIL_USER_TURNS,
+        SUMMARY_TIMEOUT_SECONDS,
+        assemble_seed,
+        split_user_turns,
+        summarize_head_async,
+    )
+
+    sid = str(params.get("session_id") or "").strip()
+    session = _sessions.get(sid) if sid else None
+    if session is None:
+        return _ok(rid, {
+            "error": "session_not_found",
+            "seed": [],
+            "summary": "",
+            "has_summary": False,
+        })
+
+    history = session.get("history") or []
+    turns = []
+    for h in history:
+        role = h.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        text = _content_display_text(h.get("content") or h.get("text")).strip()
+        if not text:
+            continue
+        turns.append({"role": role, "text": text})
+
+    tail_n = int(params.get("tail", DEFAULT_TAIL_USER_TURNS) or DEFAULT_TAIL_USER_TURNS)
+    start = split_user_turns(turns, tail_n)
+    head, tail = turns[:start], turns[start:]
+
+    summary = ""
+    if head:
+        def _blocking_summary() -> str:
+            return asyncio.run(summarize_head_async(head))
+
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                summary = ex.submit(_blocking_summary).result(timeout=SUMMARY_TIMEOUT_SECONDS + 10) or ""
+        except Exception:
+            summary = ""
+
+    seed = assemble_seed(summary or None, tail)
+    return _ok(rid, {
+        "session_id": sid,
+        "summary": summary or "",
+        "has_summary": bool(summary),
+        "tail_user_count": sum(1 for t in tail if t["role"] == "user"),
+        "seed": seed,
+    })
+
+
 @method("session.list")
 def _(rid, params: dict) -> dict:
     with _profile_db(params) as db:

@@ -67,9 +67,9 @@ export function ContextUsagePanel({
   const contextUsed = breakdown?.context_used ?? currentUsage.context_used ?? 0
 
   const contextPercent = Math.max(
-    0,
-    Math.min(100, Math.round(breakdown?.context_percent ?? currentUsage.context_percent ?? 0))
-  )
+      0,
+      Math.round(breakdown?.context_percent ?? currentUsage.context_percent ?? 0)
+    )
 
   const categories = useMemo(
     () =>

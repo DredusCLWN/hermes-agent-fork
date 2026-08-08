@@ -7,7 +7,7 @@ import {
   useMessageRuntime
 } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
-import { type FC, useCallback, useMemo, useState } from 'react'
+import { type FC, useCallback, useMemo } from 'react'
 
 import { ChangedFilesCard } from '@/components/assistant-ui/thread/changed-files-card'
 import {
@@ -25,7 +25,8 @@ import { Codicon } from '@/components/ui/codicon'
 import { CopyButton } from '@/components/ui/copy-button'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
-import { GitForkIcon, Loader2Icon, RefreshCwIcon, XIcon, Zap } from '@/lib/icons'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { BarChart3, GitForkIcon, Loader2Icon, RefreshCwIcon, XIcon, Zap } from '@/lib/icons'
 import { extractPreviewTargets } from '@/lib/preview-targets'
 import { formatAgo } from '@/lib/time'
 import { useEnterAnimation } from '@/lib/use-enter-animation'
@@ -167,28 +168,179 @@ function _fmtTokens(n: number): string {
   return String(n)
 }
 
+function _fmtCost(usd: number): string {
+  if (usd <= 0) return '$0'
+  if (usd >= 0.01) return `$${usd.toFixed(4)}`
+  if (usd >= 0.0001) return `$${usd.toFixed(6)}`
+  return `$${usd.toExponential(2)}`
+}
+
 const TokenSavings: FC = () => {
   const view = useSessionView()
   const usage = useStore(view.$usage) as UsageStats | null
   if (!usage?.savings || usage.savings <= 0) return null
 
   const breakdown = usage.savings_breakdown ?? {}
-  const cache = breakdown.cache ?? 0
-  const caveman = breakdown.caveman ?? 0
-  const compression = breakdown.compression ?? 0
-  const ponytail = breakdown.ponytail ?? 0
+  const items = [
+    { key: 'cache', label: 'Cache', value: breakdown.cache ?? 0 },
+    { key: 'caveman', label: 'Caveman', value: breakdown.caveman ?? 0 },
+    { key: 'ponytail', label: 'Ponytail', value: breakdown.ponytail ?? 0 },
+    { key: 'compression', label: 'Compression', value: breakdown.compression ?? 0 },
+    { key: 'terminal_compression', label: 'Terminal compress', value: breakdown.terminal_compression ?? 0 },
+    { key: 'micro_compact', label: 'Micro-compact', value: breakdown.micro_compact ?? 0 },
+    { key: 'cleanup_dedup', label: 'Tool dedup', value: breakdown.cleanup_dedup ?? 0 },
+    { key: 'cleanup_whitespace', label: 'Whitespace', value: breakdown.cleanup_whitespace ?? 0 },
+    { key: 'cleanup_json_compact', label: 'JSON compact', value: breakdown.cleanup_json_compact ?? 0 },
+    { key: 'cleanup_json_table', label: 'JSON table', value: breakdown.cleanup_json_table ?? 0 },
+    { key: 'cleanup_repeated_lines', label: 'Repeated lines', value: breakdown.cleanup_repeated_lines ?? 0 },
+    { key: 'cleanup_reasoning_strip', label: 'Reasoning strip', value: breakdown.cleanup_reasoning_strip ?? 0 },
+    { key: 'cleanup_read_file_dedup', label: 'Read-file dedup', value: breakdown.cleanup_read_file_dedup ?? 0 },
+    { key: 'cleanup_empty_strip', label: 'Empty strip', value: breakdown.cleanup_empty_strip ?? 0 },
+    { key: 'cleanup_terminal_truncate', label: 'Terminal truncate', value: breakdown.cleanup_terminal_truncate ?? 0 },
+    { key: 'cleanup_json_aggressive', label: 'JSON aggressive', value: breakdown.cleanup_json_aggressive ?? 0 },
+  ]
 
   return (
-    <div
-      className="flex shrink-0 items-center gap-1 py-1.5 pl-1 text-[0.6875rem] tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
-      title={`Total saved: ${usage.savings.toLocaleString()} tokens`}
-    >
-      <Zap className="size-3 text-(--ui-warm)" />
-      <span>{_fmtTokens(usage.savings)} saved</span>
-      <span className="text-muted-foreground/60">
-        · cache {_fmtTokens(cache)} · caveman {_fmtTokens(caveman)} · ponytail {_fmtTokens(ponytail)} · compress {_fmtTokens(compression)}
-      </span>
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className="flex shrink-0 items-center gap-1 py-1.5 pl-1 text-[0.6875rem] tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+          type="button"
+        >
+          <Zap className="size-3 text-(--ui-warm)" />
+          <span>{_fmtTokens(usage.savings)} saved</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={8} align="start" rich className="w-72 p-3">
+        <p className="mb-2 text-[0.6875rem] font-medium text-foreground">
+          Token savings
+        </p>
+        <ul className="flex flex-col gap-0.5">
+          {items.map(item => (
+            <li className="flex items-center justify-between gap-3 text-[0.6875rem]" key={item.key}>
+              <span className="shrink truncate text-muted-foreground">{item.label}</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{_fmtTokens(item.value)}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-2 border-t border-(--ui-stroke-tertiary) pt-1.5 text-[0.6875rem] font-medium text-foreground">
+          Total: {_fmtTokens(usage.savings)}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
+const TokenSpending: FC = () => {
+  const view = useSessionView()
+  const usage = useStore(view.$usage) as UsageStats | null
+  if (!usage || !usage.total) return null
+
+  const hasContext = usage.context_used != null && usage.context_max != null && usage.context_max > 0
+  const reasoningInOutput = (usage.reasoning ?? 0) > 0 && (usage.input + usage.output) > usage.total
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className="flex shrink-0 items-center gap-1 py-1.5 pl-1 text-[0.6875rem] tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+          type="button"
+        >
+          <BarChart3 className="size-3 text-(--ui-midground)" />
+          <span>{_fmtTokens(usage.total)}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={8} align="start" rich className="w-80 p-3">
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <p className="text-[0.6875rem] font-medium text-foreground">Token spending</p>
+          {usage.model ? (
+            <span className="shrink-0 text-[0.6875rem] text-muted-foreground">{usage.model}</span>
+          ) : null}
+        </div>
+
+        {/* Core token breakdown */}
+        <ul className="flex flex-col gap-0.5">
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">Input (prompt)</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{_fmtTokens(usage.input)}</span>
+          </li>
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">Output (completion)</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{_fmtTokens(usage.output)}</span>
+          </li>
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">
+              Reasoning{reasoningInOutput ? ' (incl. in output)' : ''}
+            </span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{_fmtTokens(usage.reasoning ?? 0)}</span>
+          </li>
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">Cache read</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{_fmtTokens(usage.cache_read ?? 0)}</span>
+          </li>
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">Cache write</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{_fmtTokens(usage.cache_write ?? 0)}</span>
+          </li>
+        </ul>
+
+        <div className="mt-1.5 border-t border-(--ui-stroke-tertiary) pt-1.5 text-[0.6875rem] font-medium text-foreground">
+          Total: {_fmtTokens(usage.total)}
+        </div>
+
+        {/* Meta: calls, cost, context, compressions, subagents */}
+        <div className="mt-2 flex flex-col gap-0.5 border-t border-(--ui-stroke-tertiary) pt-2">
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">API calls</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{usage.calls}</span>
+          </li>
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">
+              Cost{usage.cost_status && usage.cost_status !== 'unknown' ? ` (${usage.cost_status})` : ''}
+            </span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{_fmtCost(usage.cost_usd ?? 0)}</span>
+          </li>
+          {hasContext ? (
+            <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+              <span className="shrink truncate text-muted-foreground">Context window</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">
+                {_fmtTokens(usage.context_used ?? 0)}/{_fmtTokens(usage.context_max ?? 0)} ({usage.context_percent ?? 0}%)
+              </span>
+            </li>
+          ) : (
+            <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+              <span className="shrink truncate text-muted-foreground">Context window</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">—</span>
+            </li>
+          )}
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">Compressions</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{usage.compressions ?? 0}</span>
+          </li>
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">Active subagents</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{usage.active_subagents ?? 0}</span>
+          </li>
+        </div>
+
+        {/* Per-turn averages */}
+        <div className="mt-2 flex flex-col gap-0.5 border-t border-(--ui-stroke-tertiary) pt-2">
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">Avg input / call</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{usage.calls > 0 ? _fmtTokens(Math.round(usage.input / usage.calls)) : '—'}</span>
+          </li>
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">Avg output / call</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{usage.calls > 0 ? _fmtTokens(Math.round(usage.output / usage.calls)) : '—'}</span>
+          </li>
+          <li className="flex items-center justify-between gap-3 text-[0.6875rem]">
+            <span className="shrink truncate text-muted-foreground">Avg total / call</span>
+            <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">{usage.calls > 0 ? _fmtTokens(Math.round(usage.total / usage.calls)) : '—'}</span>
+          </li>
+        </div>
+
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -198,7 +350,10 @@ const AssistantActionBar: FC<MessageActionProps> = ({ messageId, getMessageText,
 
   return (
     <div className="relative flex w-full shrink-0 items-center justify-between gap-1.5">
-      <TokenSavings />
+      <div className="flex items-center gap-2">
+        <TokenSpending />
+        <TokenSavings />
+      </div>
       <ActionBarPrimitive.Root
         className={
           // NOTE: intentionally NOT `hideWhenRunning`. That prop unmounts the

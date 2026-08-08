@@ -448,6 +448,15 @@ ipcMain.handle('hermes:get-remote-display-reason', () => REMOTE_DISPLAY_REASON)
 // once the work settles.
 app.commandLine.appendSwitch('disable-renderer-backgrounding')
 
+// On Windows, set the AppUserModelID so the taskbar groups and icons are
+// associated with Hermes, not the stock Electron binary. In dev mode the
+// taskbar icon comes from electron.exe; this ID lets Windows resolve the
+// icon from the BrowserWindow's icon option instead. Must be set before
+// any windows are created.
+if (IS_WINDOWS) {
+  app.setAppUserModelId('com.nousresearch.hermes')
+}
+
 const SOURCE_REPO_ROOT = path.resolve(APP_ROOT, '../..')
 
 // Build-time install stamp -- the git ref this .exe was built against.

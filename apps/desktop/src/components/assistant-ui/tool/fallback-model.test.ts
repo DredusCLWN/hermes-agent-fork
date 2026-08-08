@@ -88,9 +88,28 @@ describe('buildToolView terminal exit-code status', () => {
     )
 
     expect(view.terminalCommand).toBe('npm run check --workspace=apps/desktop')
-    expect(view.terminalExitCode).toBe(0)
-  })
-})
+        expect(view.terminalExitCode).toBe(0)
+      })
+
+      it('flags a live process after a partial timeout result', () => {
+        // Foreground command still being monitored: the partial result carries a
+        // live process behind a `timeout` status, so buildToolView reports the
+        // row as alive and keeps the gerund "Running…" title despite a result.
+        const withCommand = (result: Record<string, unknown>) =>
+          buildToolView(part({ args: { command: 'sleep 40' }, result, toolName: 'terminal' }), '')
+        const live = withCommand({ status: 'timeout', session_id: 'proc_1', exit_code: null })
+        expect(live.processAlive).toBe(true)
+        expect(live.title).toContain('Running')
+
+        // timeout_exceeded still has a live (undecided) process underneath.
+        const exceeded = withCommand({ status: 'timeout_exceeded', session_id: 'proc_1', exit_code: null })
+        expect(exceeded.processAlive).toBe(true)
+
+        // A finished command (real exit_code, no status) is not alive.
+        expect((withCommand({ exit_code: 0, output: 'done' }).processAlive ?? false)).toBe(false)
+        expect((withCommand({ status: 'killed', exit_code: -15 }).processAlive ?? false)).toBe(false)
+      })
+    })
 
 describe('buildToolView web-search query', () => {
   it('keeps the query separate from structured search results', () => {

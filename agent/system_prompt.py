@@ -47,6 +47,7 @@ from agent.prompt_builder import (
     STEER_CHANNEL_NOTE,
     TASK_COMPLETION_GUIDANCE,
     TELEGRAM_RICH_MESSAGES_HINT,
+    TOOL_RESULT_COMPRESSION_GUIDANCE,
     TOOL_USE_ENFORCEMENT_GUIDANCE,
     TOOL_USE_ENFORCEMENT_MODELS,
     drain_truncation_warnings,
@@ -225,6 +226,13 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # (default True) and only injected when tools are actually loaded.
     if getattr(agent, "_parallel_tool_call_guidance", True) and agent.valid_tool_names:
         stable_parts.append(PARALLEL_TOOL_CALL_GUIDANCE)
+
+    # Tool-result compression markers — the per-request cleanup pipeline
+    # in conversation_loop.py may compact tool output (dedup, JSON table
+    # transform, repeated-line aggregation). The model must know the
+    # shorthand or it misreads tool results. All models, tiny fixed cost.
+    if agent.valid_tool_names:
+        stable_parts.append(TOOL_RESULT_COMPRESSION_GUIDANCE)
 
     # Caveman response style — terse, structured output. Static per session
     # so it's cache-safe. Gated by config.yaml ``display.response_style``
@@ -430,21 +438,39 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         active_profile = _resolve_active_profile_name()
     except Exception:
         active_profile = "default"
-    if active_profile == "default":
+    # Skip the profile hint when there is only the default profile — the
+    # cross-profile warning is meaningless when no other profiles exist.
+    _hermes_home = get_hermes_home()
+    _profiles_dir = os.path.join(str(_hermes_home), "profiles")
+    _has_other_profiles = False
+    try:
+        _profile_names = [
+            d for d in os.listdir(_profiles_dir)
+            if os.path.isdir(os.path.join(_profiles_dir, d))
+        ] if os.path.isdir(_profiles_dir) else []
+        _has_other_profiles = len(_profile_names) > 1 or (
+            len(_profile_names) == 1 and _profile_names[0] != "default"
+        )
+    except Exception:
+        _has_other_profiles = True  # safe default: show the hint
+    if active_profile == "default" and not _has_other_profiles:
+        pass  # single-profile setup — no hint needed
+    elif active_profile == "default":
         post_workspace_parts.append(
             "Active Hermes profile: default. Other profiles (if any) live "
-            "under " + str(get_hermes_home()) + "/profiles/<name>/. Each profile has its own "
+            "under " + str(_hermes_home) + "/profiles/<name>/. Each profile has its own "
             "skills/, plugins/, cron/, and memories/ that affect a different "
             "session than this one. Do not modify another profile's "
             "skills/plugins/cron/memories unless the user explicitly directs "
             "you to."
         )
     else:
+        _hh = str(_hermes_home)
         post_workspace_parts.append(
             f"Active Hermes profile: {active_profile}. This session reads "
-            f"and writes {get_hermes_home()}/profiles/{active_profile}/. The default "
-            f"profile's data lives at {get_hermes_home()}/skills/, {get_hermes_home()}/plugins/, "
-            f"{get_hermes_home()}/cron/, {get_hermes_home()}/memories/ — those belong to a "
+            f"and writes {_hh}/profiles/{active_profile}/. The default "
+            f"profile's data lives at {_hh}/skills/, {_hh}/plugins/, "
+            f"{_hh}/cron/, {_hh}/memories/ — those belong to a "
             f"different session run from a different shell. Do NOT modify "
             f"another profile's skills/plugins/cron/memories unless the user "
             f"explicitly directs you to. The cross-profile write guard will "

@@ -18,11 +18,13 @@ import { useStore } from '@nanostores/react'
 import { useQueryClient } from '@tanstack/react-query'
 import { atom, computed } from 'nanostores'
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useNavigate } from 'react-router'
 
 import { useGatewayRequest } from '@/app/gateway/hooks/use-gateway-request'
 import { useModelControls } from '@/app/session/hooks/use-model-controls'
 import { blobToDataUrl } from '@/app/session/hooks/use-prompt-actions/utils'
 import { resolveStoredSession } from '@/app/session/hooks/use-session-actions/utils'
+import { sessionRoute } from '@/app/routes'
 import { ModelMenuPanel } from '@/app/shell/model-menu-panel'
 import { formatRefValue } from '@/components/assistant-ui/directive-text'
 import { CenteredThreadSpinner } from '@/components/assistant-ui/thread/status'
@@ -123,6 +125,7 @@ function TileChat({
 }) {
   const { gateway, requestGateway } = useGatewayRequest()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { selectModel } = useModelControls({ queryClient, requestGateway })
   const activeGatewayProfile = useStore($activeGatewayProfile)
   const cwd = useStore(view.$cwd)
@@ -215,6 +218,10 @@ function TileChat({
           onThreadMessagesChange={actions.handleThreadMessagesChange}
           onToggleSelectedPin={noop}
           onTranscribeAudio={tileTranscribeAudio}
+          onTransfer={useCallback(async () => {
+            const storedId = await actions.transferToNewSession()
+            if (storedId) navigate(sessionRoute(storedId), { replace: true })
+          }, [actions, navigate])}
         />
       </ComposerScopeProvider>
     </SessionViewProvider>

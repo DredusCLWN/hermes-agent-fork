@@ -434,7 +434,8 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     removeSession,
     resumeSession,
     selectSidebarItem,
-    startFreshSessionDraft
+    startFreshSessionDraft,
+    transferToNewSession
   } = useSessionActions({
     activeSessionId,
     activeSessionIdRef,
@@ -838,6 +839,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     onSubmit: submitText,
     onThreadMessagesChange: handleThreadMessagesChange,
     onToggleSelectedPin: toggleSelectedPin,
+    onTransfer: transferToNewSession,
     onTriggerCronJob: jobId => {
       void triggerCronJob(jobId)
         .then(() => refreshCronJobs())

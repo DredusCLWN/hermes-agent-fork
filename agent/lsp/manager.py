@@ -656,6 +656,10 @@ class LSPService:
             clients = [self._clients.pop(key) for key in idle_keys]
             for key in idle_keys:
                 self._last_used.pop(key, None)
+            # Drop diagnostic baselines for the reaped clients — they're stale
+            # snapshots that get rebuilt on next get_diagnostics_sync anyway.
+            if idle_keys:
+                self._delta_baseline.clear()
         if clients:
             eventlog.log_reaped(
                 [(c.server_id, c.workspace_root) for c in clients],

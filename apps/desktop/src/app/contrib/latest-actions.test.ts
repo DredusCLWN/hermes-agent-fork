@@ -28,7 +28,8 @@ function makeChatActions(): ChatActions {
     onSubmit: vi.fn(),
     onThreadMessagesChange: vi.fn(),
     onToggleSelectedPin: vi.fn(),
-    onTranscribeAudio: vi.fn()
+    onTranscribeAudio: vi.fn(),
+    onTransfer: vi.fn()
   }
 }
 

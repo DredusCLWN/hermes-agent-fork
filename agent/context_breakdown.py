@@ -132,10 +132,10 @@ def compute_session_context_breakdown(
     measured_used = int(getattr(comp, "last_prompt_tokens", 0) or 0) if comp else 0
     context_used = measured_used if measured_used > 0 else estimated_total
     context_percent = (
-        max(0, min(100, round(context_used / context_max * 100)))
-        if context_max
-        else 0
-    )
+            max(0, round(context_used / context_max * 100))
+            if context_max
+            else 0
+        )
 
     return {
         "categories": [

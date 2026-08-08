@@ -99,7 +99,8 @@ export function ModelPill({
   }, [usage])
 
   const contextPercent = usage?.context_percent != null ? Math.round(usage.context_percent) : null
-  const contextWarn = contextPercent != null && contextPercent >= 80
+    const contextOverflow = contextPercent != null && contextPercent > 100
+    const contextWarn = contextPercent != null && (contextPercent >= 80 || contextOverflow)
 
   // The model resolves a beat after the gateway/session comes up. Rather than
   // flash a literal "No model", show a quiet loader (inherits the pill text
@@ -125,7 +126,11 @@ export function ModelPill({
       )}
       {contextLabel && (
         <span
-          className={cn('shrink-0 tabular-nums text-[0.625rem] opacity-60', contextWarn && 'text-(--ui-warning) opacity-100')}
+          className={cn(
+          'shrink-0 tabular-nums text-[0.625rem] opacity-60',
+          contextOverflow && 'text-(--ui-destructive) opacity-100 font-medium',
+          contextWarn && !contextOverflow && 'text-(--ui-warning) opacity-100'
+        )}
           title={contextPercent != null ? `${contextPercent}% context used` : undefined}
         >
           {contextBarText} {contextLabel}

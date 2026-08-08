@@ -461,6 +461,13 @@ export function useSessionTileActions({ runtimeId, scope, storedSessionId }: Ses
     [update]
   )
 
+  const transferToNewSession = useCallback(async (): Promise<string | null> => {
+    const created = await requestGateway<{ session_id: string; stored_session_id?: string }>('session.create', {
+      cwd: readState()?.cwd ?? null
+    }).catch(() => null)
+    return created?.stored_session_id ?? created?.session_id ?? null
+  }, [readState, requestGateway])
+
   return useMemo(
     () => ({
       cancelRun,
@@ -470,7 +477,8 @@ export function useSessionTileActions({ runtimeId, scope, storedSessionId }: Ses
       reloadFromMessage,
       restoreToMessage,
       steerPrompt,
-      submitText
+      submitText,
+      transferToNewSession
     }),
     [
       cancelRun,
@@ -480,7 +488,8 @@ export function useSessionTileActions({ runtimeId, scope, storedSessionId }: Ses
       reloadFromMessage,
       restoreToMessage,
       steerPrompt,
-      submitText
+      submitText,
+      transferToNewSession
     ]
   )
 }

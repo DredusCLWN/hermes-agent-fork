@@ -26,6 +26,8 @@ import type {
   HermesConfig,
   HermesConfigRecord,
   LogsResponse,
+  WebProxyActionResponse,
+  WebProxyStatusResponse,
   McpCatalogResponse,
   McpServerSummary,
   MemoryProviderConfig,
@@ -831,6 +833,40 @@ export function deleteCustomEndpoint(id: string): Promise<CustomEndpointsRespons
   return window.hermesDesktop.api<CustomEndpointsResponse>({
     path: `/api/providers/custom-endpoints/${encodeURIComponent(id)}`,
     method: 'DELETE'
+  })
+}
+
+export function getWebProxyStatus(): Promise<WebProxyStatusResponse> {
+  return window.hermesDesktop.api<WebProxyStatusResponse>({
+    path: '/api/web-proxies/status'
+  })
+}
+
+export function installWebProxy(provider: string): Promise<WebProxyActionResponse> {
+  return window.hermesDesktop.api<WebProxyActionResponse>({
+    path: `/api/web-proxies/${encodeURIComponent(provider)}/install`,
+    method: 'POST'
+  })
+}
+
+export function startWebProxy(provider: string): Promise<WebProxyActionResponse> {
+  return window.hermesDesktop.api<WebProxyActionResponse>({
+    path: `/api/web-proxies/${encodeURIComponent(provider)}/start`,
+    method: 'POST'
+  })
+}
+
+export function stopWebProxy(provider: string): Promise<WebProxyActionResponse> {
+  return window.hermesDesktop.api<WebProxyActionResponse>({
+    path: `/api/web-proxies/${encodeURIComponent(provider)}/stop`,
+    method: 'POST'
+  })
+}
+
+export function authWebProxy(provider: string): Promise<WebProxyActionResponse> {
+  return window.hermesDesktop.api<WebProxyActionResponse>({
+    path: `/api/web-proxies/${encodeURIComponent(provider)}/auth`,
+    method: 'POST'
   })
 }
 

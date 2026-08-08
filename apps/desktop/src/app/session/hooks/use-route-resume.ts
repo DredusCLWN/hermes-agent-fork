@@ -128,15 +128,6 @@ export function useRouteResume({
         Boolean(cachedRuntime) &&
         cachedRuntime === activeSessionIdRef.current
 
-      // Self-heal a desynced view: the route points at a session that isn't the
-      // loaded one. A create/stream race can leave selected/active null while
-      // the route stays on /:sid (symptom: brand-new chat shows "Thinking" then
-      // an empty transcript even though the turn completed and persisted). The
-      // pathname didn't change, so the normal gate would skip and the view stays
-      // stuck empty forever. selectedStoredSessionIdRef is set synchronously at
-      // resume entry, so this can't loop; the resume's cached fast-path restores
-      // the already-streamed messages without a refetch.
-      //
       // Crucially this must NOT fire during a /:sid -> /new transition, where
       // startFreshSessionDraft nulls selected/active one render before the
       // pathname flips to / (same null+/:sid signature). freshDraftReady is the

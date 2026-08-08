@@ -67,7 +67,7 @@ import {
 } from '@/store/session-states'
 import { broadcastSessionsChanged } from '@/store/session-sync'
 import { isWatchWindow } from '@/store/windows'
-import type { SessionCreateResponse, SessionMessage, SessionResumeResponse, UsageStats } from '@/types/hermes'
+import type { ContextBreakdown, SessionCreateResponse, SessionMessage, SessionResumeResponse, UsageStats } from '@/types/hermes'
 
 import { navigateToWorkspacePage, NEW_CHAT_ROUTE, sessionRoute, SETTINGS_ROUTE } from '../../../routes'
 import type { ClientSessionState, SidebarNavItem } from '../../../types'
@@ -348,7 +348,10 @@ export function useSessionActions({
   )
 
   const createBackendSessionForSend = useCallback(
-    async (preview: string | null = null): Promise<string | null> => {
+    async (
+      preview: string | null = null,
+      transfer: { seed: { role: string; content: string }[]; parentSessionId: string | null } | null = null
+    ): Promise<string | null> => {
       const startingStoredSessionId = selectedStoredSessionIdRef.current
       const startingRouteToken = getRouteToken()
 
@@ -368,6 +371,13 @@ export function useSessionActions({
               : $currentCwd.get().trim() || resolveNewSessionCwd()
 
         const params = await desktopSessionCreateParams(cwd)
+        // "Transfer to new session": carry the seed the gateway built (the
+        // seeded summary + recent-tail messages) into a continuation branch
+        // that nests under the source session and reuses its cwd/project.
+        if (transfer) {
+          if (transfer.seed?.length) params.messages = transfer.seed
+          if (transfer.parentSessionId) params.parent_session_id = transfer.parentSessionId
+        }
         const created = await requestGateway<SessionCreateResponse>('session.create', params)
         const stored = created.stored_session_id ?? null
 
@@ -449,6 +459,10 @@ export function useSessionActions({
       updateSessionState
     ]
   )
+
+  const transferToNewSession = useCallback(async (): Promise<string | null> => {
+    return createBackendSessionForSend(null, null)
+  }, [createBackendSessionForSend])
 
   const selectSidebarItem = useCallback(
     (item: SidebarNavItem) => {
@@ -694,6 +708,29 @@ export function useSessionActions({
           setCurrentBranch(cachedViewState.branch)
           setSessionStartedAt(Date.now())
 
+          // Fetch context breakdown for the warm-cache path too, with retry
+          // in case the agent is still building.
+          const fetchContextBreakdownWarm = (sid: string, attempt: number) => {
+            void requestGateway<ContextBreakdown>('session.context_breakdown', { session_id: sid })
+              .then(breakdown => {
+                if (!isCurrentResume() || !breakdown) return
+
+                setCurrentUsage(current => ({
+                  ...current,
+                  context_max: breakdown.context_max,
+                  context_percent: breakdown.context_percent,
+                  context_used: breakdown.context_used
+                }))
+
+                if (!breakdown.context_max && attempt < 2) {
+                  setTimeout(() => fetchContextBreakdownWarm(sid, attempt + 1), 2000)
+                }
+              })
+              .catch(() => undefined)
+          }
+
+          fetchContextBreakdownWarm(cachedRuntimeId, 0)
+
           try {
             let activated: SessionResumeResponse | null = null
 
@@ -733,7 +770,23 @@ export function useSessionActions({
               sessionStateByRuntimeIdRef.current.delete(cachedRuntimeId)
               dropSessionState(cachedRuntimeId)
             } else {
-              const runtimeInfo = applyRuntimeInfo(activated.info)
+              // Fetch fresh usage immediately on resume — not just on the first
+              // user turn — so savings/context stats render right away instead of
+              // staying empty until the first agent response (#usage-on-attach).
+              const usage = await requestGateway<UsageStats>('session.usage', {
+                session_id: cachedRuntimeId,
+              })
+
+              if (!isCurrentResume()) {
+                return
+              }
+
+              if (usage) {
+                setCurrentUsage(current => ({ ...current, ...usage }))
+              }
+            }
+
+            const runtimeInfo = applyRuntimeInfo(activated.info)
 
               let activatedMessages =
                 activated.messages.length || activated.inflight || activated.queued
@@ -784,7 +837,6 @@ export function useSessionActions({
               syncSessionStateToView(cachedRuntimeId, activatedState)
 
               return
-            }
           } catch (error) {
             // The cached runtime id was minted by a prior backend instance. A
             // pooled profile backend that gets idle-reaped (pruneSecondaryGateways)
@@ -979,6 +1031,32 @@ export function useSessionActions({
         setActiveSessionId(resumed.session_id)
         activeSessionIdRef.current = resumed.session_id
         const runtimeInfo = applyRuntimeInfo(resumed.info)
+
+        // Fetch context breakdown so the statusbar context-usage indicator
+        // populates on resume — not only after the first agent response or
+        // the user opening the context-usage menu. The agent may still be
+        // building when we fire the first request (deferred build), so retry
+        // once after a short delay if it came back empty.
+        const fetchContextBreakdown = (sid: string, attempt: number) => {
+          void requestGateway<ContextBreakdown>('session.context_breakdown', { session_id: sid })
+            .then(breakdown => {
+              if (!isCurrentResume() || !breakdown) return
+
+              setCurrentUsage(current => ({
+                ...current,
+                context_max: breakdown.context_max,
+                context_percent: breakdown.context_percent,
+                context_used: breakdown.context_used
+              }))
+
+              if (!breakdown.context_max && attempt < 2) {
+                setTimeout(() => fetchContextBreakdown(sid, attempt + 1), 2000)
+              }
+            })
+            .catch(() => undefined)
+        }
+
+        fetchContextBreakdown(resumed.session_id, 0)
 
         patchSessionWorkspace(storedSessionId, runtimeInfo?.cwd)
 
@@ -1336,10 +1414,33 @@ export function useSessionActions({
 
       try {
         if (closingRuntimeId) {
-          await requestGateway('session.close', { session_id: closingRuntimeId }).catch(() => undefined)
+          // Fire-and-forget: don't block deletion on TUI gateway cleanup.
+          // The REST DELETE is independent of the TUI session lifecycle, and
+          // awaiting session.close can hang up to the 30s RPC timeout if the
+          // gateway is busy or disconnected — making deletion appear broken.
+          requestGateway('session.close', { session_id: closingRuntimeId }).catch(() => undefined)
         }
 
-        await deleteSession(storedSessionId, removed?.profile)
+        // Retry on 503 (database locked) — the TUI gateway's session.close
+        // teardown may hold the state.db write lock briefly. Up to 3 attempts
+        // with 500ms backoff covers the typical lock duration.
+        let lastErr: unknown
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await deleteSession(storedSessionId, removed?.profile)
+            lastErr = null
+            break
+          } catch (err) {
+            lastErr = err
+            const msg = err instanceof Error ? err.message : String(err)
+            if (/^503:/.test(msg) && attempt < 2) {
+              await new Promise(r => setTimeout(r, 500 * (attempt + 1)))
+              continue
+            }
+            throw err
+          }
+        }
+        if (lastErr) throw lastErr
         clearQueuedPrompts(storedSessionId)
 
         if (closingRuntimeId) {
@@ -1467,6 +1568,7 @@ export function useSessionActions({
     removeSession,
     resumeSession,
     selectSidebarItem,
-    startFreshSessionDraft
+    startFreshSessionDraft,
+    transferToNewSession
   }
 }

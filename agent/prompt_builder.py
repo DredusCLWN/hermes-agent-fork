@@ -27,6 +27,7 @@ from agent.skill_utils import (
     extract_skill_description,
     get_all_skills_dirs,
     get_disabled_skill_names,
+    get_skills_index_mode,
     iter_skill_index_files,
     org_id_of_path,
     parse_frontmatter,
@@ -152,14 +153,9 @@ DEFAULT_AGENT_IDENTITY = (
 )
 
 HERMES_AGENT_HELP_GUIDANCE = (
-    "You run on Hermes Agent (by Nous Research). When the user needs help with "
-    "Hermes itself — configuring, setting up, using, extending, or troubleshooting "
-    "it — or when you need to understand your own features, tools, or capabilities, "
-    "the documentation at https://hermes-agent.nousresearch.com/docs is your "
-    "authoritative reference and always holds the latest, most up-to-date "
-    "information. Load the `hermes-agent` skill with skill_view(name='hermes-agent') "
-    "for additional guidance and proven workflows, but treat the docs as the source "
-    "of truth when the two differ."
+    "For Hermes Agent configuration, setup, or troubleshooting, the docs at "
+    "https://hermes-agent.nousresearch.com/docs are the authoritative reference. "
+    "Load the `hermes-agent` skill with skill_view(name='hermes-agent') for proven workflows."
 )
 
 MEMORY_GUIDANCE = (
@@ -172,17 +168,12 @@ MEMORY_GUIDANCE = (
     "User preferences and recurring corrections matter more than procedural task details.\n"
     "Do NOT save task progress, session outcomes, completed-work logs, or temporary TODO "
     "state to memory; use session_search to recall those from past transcripts. "
-    "Specifically: do not record PR numbers, issue numbers, commit SHAs, 'fixed bug X', "
-    "'submitted PR Y', 'Phase N done', file counts, or any artifact that will be stale "
-    "in 7 days. If a fact will be stale in a week, it does not belong in memory. "
-    "If you've discovered a new way to do something, solved a problem that could be "
-    "necessary later, save it as a skill with the skill tool.\n"
+    "If a fact will be stale in a week, it does not belong in memory. "
+    "If you've discovered a new workflow worth reusing, save it as a skill with the skill tool.\n"
     "Write memories as declarative facts, not instructions to yourself. "
     "'User prefers concise responses' ✓ — 'Always respond concisely' ✗. "
-    "'Project uses pytest with xdist' ✓ — 'Run tests with pytest -n 4' ✗. "
-    "Imperative phrasing gets re-read as a directive in later sessions and can "
-    "cause repeated work or override the user's current request. Procedures and "
-    "workflows belong in skills, not memory."
+    "Imperative phrasing gets re-read as a directive in later sessions. "
+    "Procedures and workflows belong in skills, not memory."
 )
 
 SESSION_SEARCH_GUIDANCE = (
@@ -198,6 +189,10 @@ SKILLS_GUIDANCE = (
     "When using a skill and finding it outdated, incomplete, or wrong, "
     "patch it immediately with skill_manage(action='patch') — don't wait to be asked. "
     "Skills that aren't maintained become liabilities.\n"
+    "\n"
+    "## Skill Discovery\n"
+    "If the skill index is not shown above, use skills_list(query='<task keywords>') "
+    "to find relevant skills on-demand, then load with skill_view(name='...').\n"
     "\n"
     "## Skill Safety Rule\n"
     "1. **UNAVAILABLE** — If a skill placeholder contains `[SKILL_PRUNED]`, the skill content was lost in compression and is inaccessible.\n"
@@ -310,12 +305,8 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "# Tool-use enforcement\n"
     "You MUST use your tools to take action — do not describe what you would do "
     "or plan to do without actually doing it. When you say you will perform an "
-    "action (e.g. 'I will run the tests', 'Let me check the file', 'I will create "
-    "the project'), you MUST immediately make the corresponding tool call in the same "
+    "action, you MUST immediately make the corresponding tool call in the same "
     "response. Never end your turn with a promise of future action — execute it now.\n"
-    "Keep working until the task is actually complete. Do not stop with a summary of "
-    "what you plan to do next time. If you have tools available that can accomplish "
-    "the task, use them instead of telling the user what you would do.\n"
     "Every response should either (a) contain tool calls that make progress, or "
     "(b) deliver a final result to the user. Responses that only describe intentions "
     "without acting are not acceptable."
@@ -324,6 +315,23 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
 # Model name substrings that trigger tool-use enforcement guidance.
 # Add new patterns here when a model family needs explicit steering.
 TOOL_USE_ENFORCEMENT_MODELS = ("gpt", "codex", "gemini", "gemma", "grok", "glm", "qwen", "deepseek")
+
+# Universal tool-result compression markers — injected for ALL models
+# alongside the cleanup pipeline in conversation_loop.py (per-request
+# copies only; stored history is never mutated). The model must know the
+# shorthand exists or it misreads tool output. Keep tight: token cost is
+# paid in the cached system prompt.
+TOOL_RESULT_COMPRESSION_GUIDANCE = (
+    "# Tool-result compression\n"
+    "Tool results in this conversation may be lightly compressed to save tokens; "
+    "no information is lost. Expand the markers mentally:\n"
+    "- An exact duplicate of an earlier result may appear as \"[Same result as above]\" — "
+    "treat it as the earlier content.\n"
+    "- A JSON array of objects may appear as {\"_table\": true, \"schema\": [\"col1\", ...], \"rows\": [[...], ...]} — "
+    "zip schema with each row to reconstruct the objects.\n"
+    "- N identical consecutive lines may appear as \"[N× line]\" — read it as the line repeated N times.\n"
+    "Do not re-run a tool just to obtain output you can already expand from these markers.\n"
+)
 
 # Universal "finish the job" guidance — applied to ALL models, not gated
 # by model family.  Addresses two cross-model failure modes:
@@ -471,17 +479,11 @@ CAVEMAN_RESPONSE_STYLE = (
     "ALWAYS keep technical terms, code, API names, CLI commands, commit-type keywords "
     "(feat/fix/...), and exact error strings verbatim — unless user explicitly ask for translation.\n"
     "\n"
-    "'Drop articles' = article languages only. Where small markers carry case/role "
-    "(particles, postpositions), keep them — grammar, not filler; compress politeness/filler instead.\n"
-    "\n"
     "No self-reference. Never name or announce the style. No \"caveman mode on\", "
     "no third-person caveman tags. Output caveman-only — never normal answer plus recap.\n"
     "\n"
-    "Pattern: [thing] [action] [reason]. [next step].\n"
-    "\n"
-    "Not: \"Sure! I'd be happy to help you with that. The issue you're experiencing "
-    "is likely caused by...\"\n"
-    "Yes: \"Bug in auth middleware. Token expiry check use < not <=. Fix:\"\n"
+    "'Drop articles' = article languages only. Where small markers carry case/role "
+    "(particles, postpositions), keep them — compress politeness/filler instead.\n"
     "\n"
     "## Auto-Clarity\n"
     "Drop caveman when:\n"
@@ -697,11 +699,8 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "# Execution discipline\n"
     "<tool_persistence>\n"
     "- Use tools whenever they improve correctness, completeness, or grounding.\n"
-    "- Do not stop early when another tool call would materially improve the result.\n"
     "- If a tool returns empty or partial results, retry with a different query or "
     "strategy before giving up.\n"
-    "- Keep calling tools until: (1) the task is complete, AND (2) you have verified "
-    "the result.\n"
     "</tool_persistence>\n"
     "\n"
     "<mandatory_tool_use>\n"
@@ -718,22 +717,15 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "says about their personal setup.\n"
     "</mandatory_tool_use>\n"
     "\n"
-    "<act_dont_ask>\n"
+    "<act_and_prepare>\n"
     "When a question has an obvious default interpretation, act on it immediately "
-    "instead of asking for clarification. Examples:\n"
-    "- 'Is port 443 open?' → check THIS machine (don't ask 'open where?')\n"
-    "- 'What OS am I running?' → check the live system (don't use user profile)\n"
-    "- 'What time is it?' → run `date` (don't guess)\n"
-    "Only ask for clarification when the ambiguity genuinely changes what tool "
-    "you would call.\n"
-    "</act_dont_ask>\n"
-    "\n"
-    "<prerequisite_checks>\n"
-    "- Before taking an action, check whether prerequisite discovery, lookup, or "
-    "context-gathering steps are needed.\n"
-    "- Do not skip prerequisite steps just because the final action seems obvious.\n"
-    "- If a task depends on output from a prior step, resolve that dependency first.\n"
-    "</prerequisite_checks>\n"
+    "instead of asking for clarification. Only ask when the ambiguity genuinely "
+    "changes what tool you would call.\n"
+    "Before taking an action, check whether prerequisite discovery, lookup, or "
+    "context-gathering steps are needed — do not skip them just because the final "
+    "action seems obvious. If a task depends on output from a prior step, resolve "
+    "that dependency first.\n"
+    "</act_and_prepare>\n"
     "\n"
     "<verification>\n"
     "Before finalizing your response:\n"
@@ -742,15 +734,7 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "- Formatting: does the output match the requested format or schema?\n"
     "- Safety: if the next step has side effects (file writes, commands, API calls), "
     "confirm scope before executing.\n"
-    "</verification>\n"
-    "\n"
-    "<missing_context>\n"
-    "- If required context is missing, do NOT guess or hallucinate an answer.\n"
-    "- Use the appropriate lookup tool when missing information is retrievable "
-    "(search_files, web_search, read_file, etc.).\n"
-    "- Ask a clarifying question only when the information cannot be retrieved by tools.\n"
-    "- If you must proceed with incomplete information, label assumptions explicitly.\n"
-    "</missing_context>"
+    "</verification>"
 )
 
 # Gemini/Gemma-specific operational guidance, adapted from OpenCode's gemini.txt.
@@ -760,20 +744,14 @@ GOOGLE_MODEL_OPERATIONAL_GUIDANCE = (
     "Follow these operational rules strictly:\n"
     "- **Absolute paths:** Always construct and use absolute file paths for all "
     "file system operations. Combine the project root with relative paths.\n"
-    "- **Verify first:** Use read_file/search_files to check file contents and "
-    "project structure before making changes. Never guess at file contents.\n"
     "- **Dependency checks:** Never assume a library is available. Check "
     "package.json, requirements.txt, Cargo.toml, etc. before importing.\n"
-    "- **Conciseness:** Keep explanatory text brief — a few sentences, not "
-    "paragraphs. Focus on actions and results over narration.\n"
     # Parallel-tool-call steering now lives in the universal
     # PARALLEL_TOOL_CALL_GUIDANCE block (injected for all models), so it is no
     # longer duplicated here — keeping it would send Gemini/Gemma the same
     # instruction twice.
     "- **Non-interactive commands:** Use flags like -y, --yes, --non-interactive "
     "to prevent CLI tools from hanging on prompts.\n"
-    "- **Keep going:** Work autonomously until the task is fully resolved. "
-    "Don't stop with a plan — execute it.\n"
 )
 
 
@@ -1900,6 +1878,12 @@ def build_skills_system_prompt(
     if not skills_dir.exists() and not external_dirs:
         return ""
 
+    # ── Index mode: 'full' (default) or 'hint' (compact) ──────────────
+    # 'hint' mode replaces the full skill index with a short pointer,
+    # saving thousands of tokens in system prompt. The agent discovers
+    # skills on-demand via skills_list(query='...').
+    index_mode = get_skills_index_mode()
+
     # ── Layer 1: in-process LRU cache ─────────────────────────────────
     # Include the resolved platform so per-platform disabled-skill lists
     # produce distinct cache entries (gateway serves multiple platforms).
@@ -1913,12 +1897,38 @@ def build_skills_system_prompt(
         _platform_hint,
         tuple(sorted(disabled)),
         tuple(sorted(compact_categories or ())),
+        index_mode,
     )
     with _SKILLS_PROMPT_CACHE_LOCK:
         cached = _SKILLS_PROMPT_CACHE.get(cache_key)
         if cached is not None:
             _SKILLS_PROMPT_CACHE.move_to_end(cache_key)
             return cached
+
+    # ── Hint mode: short pointer, no full index ───────────────────────
+    if index_mode == "hint":
+        result = (
+            "## Skills (on-demand)\n"
+            "Skills are available but not listed here to save tokens.\n"
+            "Before replying to a task, call skills_list(query='<your task "
+            "keywords>') to find relevant skills, then skill_view(name='...') "
+            "to load full instructions.\n"
+            "Err on the side of searching — it is always better to discover "
+            "a relevant skill than to miss critical steps or established "
+            "workflows.\n"
+            "Whenever the user asks you to configure, set up, install, enable, "
+            "disable, modify, or troubleshoot Hermes Agent itself, search for "
+            "the 'hermes-agent' skill first.\n"
+            "If a skill you loaded was missing steps, had wrong commands, or "
+            "needed pitfalls you discovered, update it with "
+            "skill_manage(action='patch') before finishing.\n"
+        )
+        with _SKILLS_PROMPT_CACHE_LOCK:
+            _SKILLS_PROMPT_CACHE[cache_key] = result
+            _SKILLS_PROMPT_CACHE.move_to_end(cache_key)
+            while len(_SKILLS_PROMPT_CACHE) > _SKILLS_PROMPT_CACHE_MAX:
+                _SKILLS_PROMPT_CACHE.popitem(last=False)
+        return result
 
     # ── Layer 2: disk snapshot ────────────────────────────────────────
     snapshot = _load_skills_snapshot(skills_dir)

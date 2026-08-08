@@ -50,7 +50,7 @@ import type { StatusResponse, UsageStats } from '@/types/hermes'
 import { CRON_ROUTE, SETTINGS_ROUTE, WEBHOOKS_ROUTE } from '../../routes'
 import type { StatusbarItem } from '../statusbar-controls'
 
-const EMPTY_USAGE = { calls: 0, input: 0, output: 0, total: 0 } as const
+const EMPTY_USAGE = { calls: 0, input: 0, output: 0, total: 0, context_used: 0, context_max: 0, context_percent: 0 } as const
 
 interface StatusbarItemsOptions {
   agentsOpen: boolean
@@ -224,7 +224,8 @@ export function useStatusbarItems({
       : null
 
   const contextUsage = useMemo(() => usageContextLabel(currentUsage), [currentUsage])
-  const contextBar = useMemo(() => contextBarLabel(currentUsage), [currentUsage])
+    const contextBar = useMemo(() => contextBarLabel(currentUsage), [currentUsage])
+    const contextOverflow = (currentUsage.context_percent ?? 0) > 100
 
   const publishContextUsage = useCallback(
     (snapshot: Pick<UsageStats, 'context_max' | 'context_percent' | 'context_used'>) => {
@@ -546,9 +547,10 @@ export function useStatusbarItems({
       },
       {
         detail: contextBar || undefined,
-        hidden: !contextUsage,
-        id: 'context-usage',
-        label: contextUsage,
+                hidden: !contextUsage,
+                id: 'context-usage',
+                label: contextUsage,
+                className: contextOverflow ? 'text-(--ui-destructive)' : undefined,
         menuAlign: 'end',
         menuClassName: 'w-auto border-(--ui-stroke-secondary) p-0',
         menuContent: (

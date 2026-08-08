@@ -620,8 +620,7 @@ export function ChatSidebar({
           },
           isPinnedSession
         )
-      ),
-      activeProjectId
+      )
     )
 
     // Layer the user's manual drag-order on top of the deterministic sort. Empty
@@ -633,7 +632,6 @@ export function ChatSidebar({
     projectTree,
     dismissedAutoProjects,
     orderRepos,
-    activeProjectId,
     projectOrderIds,
     isPinnedSession,
     s
