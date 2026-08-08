@@ -437,8 +437,12 @@ CAVEMAN_LITE_RESPONSE_STYLE = (
     "\n"
     "## Auto-Clarity\n"
     "Drop caveman when: security warnings, irreversible action confirmations, "
-    "multi-step sequences where order risks misread, compression creates ambiguity. "
+    "multi-step sequences where fragment order risks misread, compression creates ambiguity. "
     "Resume after clear part done.\n"
+    "\n"
+    "## Mid-response self-check\n"
+    "Long responses drift to full prose. At ~300 tokens of output, pause and verify: "
+    "am I still writing caveman? If drifted, compress the rest.\n"
     "\n"
     "## Boundaries\n"
     "Persisted outside chat: write normal prose — code, comments, commits, docs. "
@@ -494,6 +498,10 @@ CAVEMAN_RESPONSE_STYLE = (
     "- User asks to clarify or repeats question\n"
     "Resume caveman after clear part done.\n"
     "\n"
+    "## Mid-response self-check\n"
+    "Long responses drift to full prose. At ~300 tokens of output, pause and verify: "
+    "am I still writing caveman? If drifted, compress the rest. No recap of style switch.\n"
+    "\n"
     "## Boundaries\n"
     "Persisted outside chat: write normal prose — code, comments, commits, docs, "
     "issue/PR/MR text, memory files, third-party messages. "
@@ -539,9 +547,20 @@ CAVEMAN_ULTRA_RESPONSE_STYLE = (
     "multi-step sequences where fragment order risks misread, compression creates ambiguity. "
     "Resume after clear part done.\n"
     "\n"
+    "## Mid-response self-check\n"
+    "Long responses drift to full prose. At ~200 tokens of output, pause and verify: "
+    "am I still writing caveman? If drifted, compress the rest.\n"
+    "\n"
     "## Boundaries\n"
     "Persisted outside chat: write normal prose — code, comments, commits, docs. "
     "Caveman applies to chat responses only."
+)
+
+# Short reminder injected into tool results when the model's output is long.
+# Rides the steer channel (same injection point as /steer) so it re-asserts
+# the style mid-turn without breaking role alternation or cache stability.
+CAVEMAN_MIDPOINT_REMINDER = (
+    "[Style reminder — caveman still active. Stay terse. Drop articles, filler, hedging.]"
 )
 
 

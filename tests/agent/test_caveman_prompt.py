@@ -14,6 +14,7 @@ from agent.prompt_builder import (
     CAVEMAN_RESPONSE_STYLE,
     CAVEMAN_LITE_RESPONSE_STYLE,
     CAVEMAN_ULTRA_RESPONSE_STYLE,
+    CAVEMAN_MIDPOINT_REMINDER,
     get_caveman_prompt,
 )
 
@@ -48,6 +49,22 @@ class TestCavemanConstant:
         assert get_caveman_prompt("full") is CAVEMAN_RESPONSE_STYLE
         assert get_caveman_prompt("auto") is CAVEMAN_RESPONSE_STYLE
         assert get_caveman_prompt("unknown") is CAVEMAN_RESPONSE_STYLE
+
+    def test_midpoint_reminder_exists(self):
+        assert CAVEMAN_MIDPOINT_REMINDER
+        assert isinstance(CAVEMAN_MIDPOINT_REMINDER, str)
+        assert "caveman" in CAVEMAN_MIDPOINT_REMINDER.lower()
+        assert "terse" in CAVEMAN_MIDPOINT_REMINDER.lower()
+
+    def test_full_style_has_midresponse_selfcheck(self):
+        assert "mid-response" in CAVEMAN_RESPONSE_STYLE.lower()
+        assert "self-check" in CAVEMAN_RESPONSE_STYLE.lower()
+
+    def test_lite_style_has_midresponse_selfcheck(self):
+        assert "mid-response" in CAVEMAN_LITE_RESPONSE_STYLE.lower()
+
+    def test_ultra_style_has_midresponse_selfcheck(self):
+        assert "mid-response" in CAVEMAN_ULTRA_RESPONSE_STYLE.lower()
 
 
 class TestDefaultConfig:

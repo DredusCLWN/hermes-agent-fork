@@ -6193,6 +6193,9 @@ def run_conversation(
             except Exception:
                 pass
 
+            # Track assistant response length for caveman midpoint reminder
+            _assistant_response_len = len(assistant_message.content or "")
+
             # Handle assistant response
             if assistant_message.content and not agent.quiet_mode:
                 if agent.verbose_logging:
@@ -6778,6 +6781,37 @@ def run_conversation(
                         pass
 
                 agent._execute_tool_calls(assistant_message, messages, effective_task_id, api_call_count)
+
+                # Caveman midpoint reminder: if the last assistant response was
+                # long (likely to drift from caveman style), inject a short
+                # reminder into the last tool result so the model re-asserts
+                # terse style on its next response. Rides the same tool-result
+                # channel as /steer — no role-alternation break, no cache bust.
+                _caveman_style = getattr(agent, "_response_style", "")
+                if (
+                    _caveman_style
+                    and _caveman_style.lower() == "caveman"
+                    and _assistant_response_len > 1200
+                ):
+                    from agent.prompt_builder import CAVEMAN_MIDPOINT_REMINDER
+                    for _ri in range(len(messages) - 1, -1, -1):
+                        _rm = messages[_ri]
+                        if isinstance(_rm, dict) and _rm.get("role") == "tool":
+                            _existing = _rm.get("content", "")
+                            if isinstance(_existing, str):
+                                _rm["content"] = _existing + "\n" + CAVEMAN_MIDPOINT_REMINDER
+                            else:
+                                try:
+                                    _blocks = list(_existing) if _existing else []
+                                    _blocks.append({"type": "text", "text": CAVEMAN_MIDPOINT_REMINDER})
+                                    _rm["content"] = _blocks
+                                except Exception:
+                                    pass
+                            logger.debug(
+                                "Caveman midpoint reminder injected (response_len=%d)",
+                                _assistant_response_len,
+                            )
+                            break
 
                 if getattr(agent, "_incremental_persistence_failed", False):
                     # A tool result could not be made canonical. Do not send
