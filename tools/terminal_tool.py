@@ -3127,7 +3127,7 @@ def terminal_tool(
                 _domain_compressed = False
                 try:
                     from tools.terminal_compression import compress_terminal_output
-                    output, _domain_compressed, _domain_chars_saved = compress_terminal_output(
+                    output, _domain_compressed = compress_terminal_output(
                         command, output, MAX_OUTPUT_CHARS,
                     )
                 except Exception:

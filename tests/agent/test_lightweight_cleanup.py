@@ -11,15 +11,16 @@ from agent.conversation_loop import (
 
 class TestDedupToolResults:
     def test_identical_tool_results_collapsed(self):
+        long_result = "Configuration loaded successfully:\nkey1=value1\nkey2=value2\nkey3=value3"
         msgs = [
             {"role": "user", "content": "check config"},
             {"role": "assistant", "content": "", "tool_calls": [{"id": "t1", "function": {"name": "read_file"}}]},
-            {"role": "tool", "tool_call_id": "t1", "content": "config: value=1"},
+            {"role": "tool", "tool_call_id": "t1", "content": long_result},
             {"role": "assistant", "content": "", "tool_calls": [{"id": "t2", "function": {"name": "read_file"}}]},
-            {"role": "tool", "tool_call_id": "t2", "content": "config: value=1"},
+            {"role": "tool", "tool_call_id": "t2", "content": long_result},
         ]
         _dedup_tool_results(msgs)
-        assert msgs[2]["content"] == "config: value=1"
+        assert msgs[2]["content"] == long_result
         assert msgs[4]["content"] == "[Same result as above]"
 
     def test_different_tool_results_preserved(self):
@@ -65,13 +66,14 @@ class TestDedupToolResults:
         assert msgs[1]["content"] == ""
 
     def test_three_identical_only_first_kept(self):
+        long_result = "This is a long enough tool result that the dedup marker will be shorter than the original content."
         msgs = [
-            {"role": "tool", "tool_call_id": "t1", "content": "same"},
-            {"role": "tool", "tool_call_id": "t2", "content": "same"},
-            {"role": "tool", "tool_call_id": "t3", "content": "same"},
+            {"role": "tool", "tool_call_id": "t1", "content": long_result},
+            {"role": "tool", "tool_call_id": "t2", "content": long_result},
+            {"role": "tool", "tool_call_id": "t3", "content": long_result},
         ]
         _dedup_tool_results(msgs)
-        assert msgs[0]["content"] == "same"
+        assert msgs[0]["content"] == long_result
         assert msgs[1]["content"] == "[Same result as above]"
         assert msgs[2]["content"] == "[Same result as above]"
 

@@ -44,54 +44,38 @@ def compress_terminal_output(
     command: str,
     output: str,
     max_chars: int,
-) -> Tuple[str, bool, int]:
+) -> Tuple[str, bool]:
     """Try domain-aware compression for *command* output.
 
     Returns ``(compressed, was_applied)``.  When ``was_applied`` is False
     the caller should fall back to head+tail truncation.
+    Chars saved is accumulated in the module-level counter
+    ``_terminal_compression_chars_saved`` (read via
+    ``get_terminal_compression_chars_saved()``).
     """
     cmd_lower = command.strip().lower()
     global _terminal_compression_chars_saved
     original_len = len(output)
 
+    def _track(compressed: str, applied: bool) -> Tuple[str, bool]:
+        global _terminal_compression_chars_saved
+        if applied:
+            _terminal_compression_chars_saved += original_len - len(compressed)
+        return compressed, applied
+
     # Order matters: most specific patterns first.
     if _is_test_command(cmd_lower):
-        compressed, applied = _compress_test_output(output, max_chars)
-        chars_saved = original_len - len(compressed) if applied else 0
-
-        _terminal_compression_chars_saved += chars_saved
-
-        return compressed, applied, chars_saved
+        return _track(*_compress_test_output(output, max_chars))
     if _is_git_diff(cmd_lower):
-        compressed, applied = _compress_git_diff(output, max_chars)
-        chars_saved = original_len - len(compressed) if applied else 0
-
-        _terminal_compression_chars_saved += chars_saved
-
-        return compressed, applied, chars_saved
+        return _track(*_compress_git_diff(output, max_chars))
     if _is_git_log(cmd_lower):
-        compressed, applied = _compress_git_log(output, max_chars)
-        chars_saved = original_len - len(compressed) if applied else 0
-
-        _terminal_compression_chars_saved += chars_saved
-
-        return compressed, applied, chars_saved
+        return _track(*_compress_git_log(output, max_chars))
     if _is_ls_command(cmd_lower):
-        compressed, applied = _compress_ls_output(output, max_chars)
-        chars_saved = original_len - len(compressed) if applied else 0
-
-        _terminal_compression_chars_saved += chars_saved
-
-        return compressed, applied, chars_saved
+        return _track(*_compress_ls_output(output, max_chars))
     if _is_build_command(cmd_lower):
-        compressed, applied = _compress_build_output(output, max_chars)
-        chars_saved = original_len - len(compressed) if applied else 0
+        return _track(*_compress_build_output(output, max_chars))
 
-        _terminal_compression_chars_saved += chars_saved
-
-        return compressed, applied, chars_saved
-
-    return output, False, 0
+    return output, False
 
 
 # ── Test runners ───────────────────────────────────────────────────────
