@@ -3973,9 +3973,9 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
     # continuations as delegate children (fail-open for orphan reopen,
     # fail-closed for adoption). Bind the parent id for both markers.
     _NON_CONTINUATION_CHILD_FILTER_SQL = (
-        "  AND COALESCE(json_extract(COALESCE({alias}model_config, '{{}}'),"
+        "  AND COALESCE(json_extract(COALESCE(NULLIF({alias}model_config, ''), '{{}}'),"
         " '$._branched_from'), '') != ?\n"
-        "  AND COALESCE(json_extract(COALESCE({alias}model_config, '{{}}'),"
+        "  AND COALESCE(json_extract(COALESCE(NULLIF({alias}model_config, ''), '{{}}'),"
         " '$._delegate_from'), '') != ?\n"
         "  AND COALESCE({alias}source, '') != 'tool'\n"
     )
@@ -4597,6 +4597,64 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         def _do(conn):
             conn.execute(
                 "UPDATE sessions SET compression_ineffective_count = ? WHERE id = ?",
+                (normalized, session_id),
+            )
+
+        self._execute_write(_do)
+
+    def get_compression_total_count(self, session_id: str) -> int:
+        """Return the persisted total compression count for the session."""
+        if not session_id:
+            return 0
+        try:
+            row = self._execute_read_one(
+                "SELECT compression_total_count FROM sessions WHERE id = ?",
+                (session_id,),
+            )
+            if row:
+                return int(row["compression_total_count"] or 0)
+        except Exception as exc:
+            logger.debug("compression_total_count lookup failed: %s", exc)
+        return 0
+
+    def set_compression_total_count(self, session_id: str, count: int) -> None:
+        """Persist the total compression count for one session."""
+        if not session_id:
+            return
+        normalized = max(0, int(count))
+
+        def _do(conn):
+            conn.execute(
+                "UPDATE sessions SET compression_total_count = ? WHERE id = ?",
+                (normalized, session_id),
+            )
+
+        self._execute_write(_do)
+
+    def get_cumulative_tokens_saved(self, session_id: str) -> int:
+        """Return the persisted cumulative tokens saved for the session."""
+        if not session_id:
+            return 0
+        try:
+            row = self._execute_read_one(
+                "SELECT cumulative_tokens_saved FROM sessions WHERE id = ?",
+                (session_id,),
+            )
+            if row:
+                return int(row["cumulative_tokens_saved"] or 0)
+        except Exception as exc:
+            logger.debug("cumulative_tokens_saved lookup failed: %s", exc)
+        return 0
+
+    def set_cumulative_tokens_saved(self, session_id: str, tokens: int) -> None:
+        """Persist the cumulative tokens saved for one session."""
+        if not session_id:
+            return
+        normalized = max(0, int(tokens))
+
+        def _do(conn):
+            conn.execute(
+                "UPDATE sessions SET cumulative_tokens_saved = ? WHERE id = ?",
                 (normalized, session_id),
             )
 
@@ -6368,8 +6426,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     JOIN sessions child ON child.parent_session_id = parent.id
                     WHERE parent.id = ?
                       AND parent.end_reason = 'compression'
-                      AND json_extract(COALESCE(child.model_config, '{{}}'), '$._branched_from') IS NULL
-                      AND json_extract(COALESCE(child.model_config, '{{}}'), '$._delegate_from') IS NULL
+                      AND json_extract(COALESCE(NULLIF(child.model_config, ''), '{{}}'), '$._branched_from') IS NULL
+                      AND json_extract(COALESCE(NULLIF(child.model_config, ''), '{{}}'), '$._delegate_from') IS NULL
                       AND COALESCE(child.source, '') != 'tool'
                     ORDER BY
                       CASE
@@ -6619,8 +6677,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     JOIN sessions parent ON parent.id = c.cur_id
                     JOIN sessions child ON child.parent_session_id = c.cur_id
                     WHERE parent.end_reason = 'compression'
-                      AND json_extract(COALESCE(child.model_config, '{{}}'), '$._branched_from') IS NULL
-                      AND json_extract(COALESCE(child.model_config, '{{}}'), '$._delegate_from') IS NULL
+                      AND json_extract(COALESCE(NULLIF(child.model_config, ''), '{{}}'), '$._branched_from') IS NULL
+                      AND json_extract(COALESCE(NULLIF(child.model_config, ''), '{{}}'), '$._delegate_from') IS NULL
                       AND COALESCE(child.source, '') != 'tool'
                 ),
                 chain_max AS (
@@ -7879,8 +7937,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     child_row = self._conn.execute(
                         "SELECT id FROM sessions "
                         "WHERE parent_session_id = ? "
-                        "  AND json_extract(COALESCE(model_config, '{}'), '$._branched_from') IS NULL "
-                        "  AND json_extract(COALESCE(model_config, '{}'), '$._delegate_from') IS NULL "
+                        "  AND json_extract(COALESCE(NULLIF(model_config, ''), '{}'), '$._branched_from') IS NULL "
+                        "  AND json_extract(COALESCE(NULLIF(model_config, ''), '{}'), '$._delegate_from') IS NULL "
                         "  AND COALESCE(source, '') != 'tool' "
                         "ORDER BY started_at DESC, id DESC LIMIT 1",
                         (current,),

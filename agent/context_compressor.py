@@ -1782,6 +1782,8 @@ class ContextCompressor(ContextEngine):
         self.get_active_compression_failure_cooldown()
         self._load_fallback_compression_streak()
         self._load_ineffective_compression_count()
+        self._load_compression_total_count()
+        self._load_cumulative_tokens_saved()
         self._load_proactive_prune_rearm_tokens()
 
     def on_session_start(self, session_id: str, **kwargs) -> None:
@@ -1957,6 +1959,64 @@ class ContextCompressor(ContextEngine):
             return
         self._ineffective_compression_count = count
         self._persist_ineffective_compression_count()
+
+    def _load_compression_total_count(self) -> None:
+        """Load the persisted total compression count for the bound session."""
+        session_db = getattr(self, "_session_db", None)
+        session_id = getattr(self, "_session_id", "")
+        getter = getattr(session_db, "get_compression_total_count", None)
+        if not session_id or not callable(getter):
+            return
+        try:
+            stored = getter(session_id)
+            if isinstance(stored, (int, float, str)):
+                self.compression_count = max(0, int(stored))
+        except (TypeError, ValueError, sqlite3.Error) as exc:
+            logger.debug("compression_total_count lookup failed: %s", exc)
+        except Exception as exc:
+            logger.debug("compression_total_count lookup failed (non-sqlite): %s", exc)
+
+    def _persist_compression_total_count(self) -> None:
+        session_db = getattr(self, "_session_db", None)
+        session_id = getattr(self, "_session_id", "")
+        setter = getattr(session_db, "set_compression_total_count", None)
+        if not session_id or not callable(setter):
+            return
+        try:
+            setter(session_id, self.compression_count)
+        except sqlite3.Error as exc:
+            logger.debug("compression_total_count persist failed: %s", exc)
+        except Exception as exc:
+            logger.debug("compression_total_count persist failed (non-sqlite): %s", exc)
+
+    def _load_cumulative_tokens_saved(self) -> None:
+        """Load the persisted cumulative tokens saved for the bound session."""
+        session_db = getattr(self, "_session_db", None)
+        session_id = getattr(self, "_session_id", "")
+        getter = getattr(session_db, "get_cumulative_tokens_saved", None)
+        if not session_id or not callable(getter):
+            return
+        try:
+            stored = getter(session_id)
+            if isinstance(stored, (int, float, str)):
+                self._cumulative_tokens_saved = max(0, int(stored))
+        except (TypeError, ValueError, sqlite3.Error) as exc:
+            logger.debug("cumulative_tokens_saved lookup failed: %s", exc)
+        except Exception as exc:
+            logger.debug("cumulative_tokens_saved lookup failed (non-sqlite): %s", exc)
+
+    def _persist_cumulative_tokens_saved(self) -> None:
+        session_db = getattr(self, "_session_db", None)
+        session_id = getattr(self, "_session_id", "")
+        setter = getattr(session_db, "set_cumulative_tokens_saved", None)
+        if not session_id or not callable(setter):
+            return
+        try:
+            setter(session_id, self._cumulative_tokens_saved)
+        except sqlite3.Error as exc:
+            logger.debug("cumulative_tokens_saved persist failed: %s", exc)
+        except Exception as exc:
+            logger.debug("cumulative_tokens_saved persist failed (non-sqlite): %s", exc)
 
     def record_completed_compaction(
         self, *, used_fallback: bool = False, feasibility_skip: bool = False,
@@ -7104,6 +7164,7 @@ This compaction should PRIORITISE preserving all information related to the focu
             compressed.append(msg)
 
         self.compression_count += 1
+        self._persist_compression_total_count()
 
         compressed = self._sanitize_tool_pairs(compressed)
 
@@ -7132,6 +7193,7 @@ This compaction should PRIORITISE preserving all information related to the focu
         self._last_compression_savings_pct = savings_pct
         if saved_estimate > 0:
             self._cumulative_tokens_saved += saved_estimate
+            self._persist_cumulative_tokens_saved()
 
         # Message-only savings are diagnostic. The anti-thrashing verdict is
         # owned by the next provider-reported prompt count, which answers the

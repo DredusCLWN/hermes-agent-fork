@@ -1924,6 +1924,16 @@ def _(rid, params: dict) -> dict:
         ineffective = getattr(compressor, "compression_ineffective_count", 0) or 0
         fallback_streak = getattr(compressor, "compression_fallback_streak", 0) or 0
 
+    # DB fallback for compression stats when agent is None or freshly restarted
+    if not compressions and key:
+        try:
+            with _session_db(session) as _db:
+                if _db is not None:
+                    compressions = int(_db.get_compression_total_count(key) or 0)
+                    cumulative_saved = int(_db.get_cumulative_tokens_saved(key) or 0)
+        except Exception:
+            pass
+
     msg_count = int(meta.get("message_count", 0) or 0)
     tool_call_count = int(meta.get("tool_call_count", 0) or 0)
     db_api_calls = int(meta.get("api_call_count", 0) or 0)

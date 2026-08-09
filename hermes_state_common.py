@@ -83,7 +83,7 @@ def _shape_preview(raw: Any) -> str:
 # A child session counts as a /branch (kept visible, never cascade-deleted) if
 # it carries the stable marker OR the legacy end_reason heuristic holds.
 _BRANCH_CHILD_SQL = (
-    "json_extract(COALESCE({a}.model_config, '{{}}'), '$._branched_from') IS NOT NULL"
+    "json_extract(COALESCE(NULLIF({a}.model_config, ''), '{{}}'), '$._branched_from') IS NOT NULL"
     " OR EXISTS (SELECT 1 FROM sessions p"
     "            WHERE p.id = {a}.parent_session_id"
     "            AND p.end_reason = 'branched'"
@@ -253,6 +253,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     compression_failure_error TEXT,
     compression_fallback_streak INTEGER NOT NULL DEFAULT 0,
     compression_ineffective_count INTEGER NOT NULL DEFAULT 0,
+    compression_total_count INTEGER NOT NULL DEFAULT 0,
+    cumulative_tokens_saved INTEGER NOT NULL DEFAULT 0,
     profile_name TEXT,
     rewind_count INTEGER NOT NULL DEFAULT 0,
     archived INTEGER NOT NULL DEFAULT 0,
