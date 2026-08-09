@@ -349,6 +349,9 @@ def revert_skill(
     """
     try:
         if old_content is not None:
+            # Parent directory may not exist if the skill was deleted
+            # (review agent removed the whole skill directory).
+            skill_path.parent.mkdir(parents=True, exist_ok=True)
             skill_path.write_text(old_content, encoding="utf-8")
             logger.info("skill_gate: reverted %s to previous content", skill_path)
         elif delete_if_new:
