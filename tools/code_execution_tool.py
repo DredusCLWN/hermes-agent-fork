@@ -49,6 +49,7 @@ _IS_WINDOWS = platform.system() == "Windows"
 from typing import Any, Dict, List, Optional, Tuple
 
 from tools.thread_context import propagate_context_to_thread
+from agent.thread_scoped_output import thread_scoped_silence
 
 # Availability gate.  On Windows we fall back to loopback TCP for the
 # sandbox RPC transport (AF_UNIX is unreliable on Windows Python) — see
@@ -125,13 +126,29 @@ def _truncate_stdout_text(stdout_text: str) -> Tuple[str, Dict[str, Any]]:
     if len(stdout_bytes) <= MAX_STDOUT_BYTES:
         return _assemble_stdout_result(stdout_bytes)
 
+    # Save full output to artifact store before truncation (if enabled).
+    # The model sees only the head+tail window; the full log is
+    # recoverable via the artifact_path reference.
+    _artifact_path = None
+    try:
+        from tools.artifact_store import save_artifact
+        _artifact_path = save_artifact("execute_code", stdout_text)
+    except Exception:
+        pass
+
     head_bytes = int(MAX_STDOUT_BYTES * 0.4)
     tail_bytes = MAX_STDOUT_BYTES - head_bytes
-    return _assemble_stdout_result(
+    stdout_text_truncated, metadata = _assemble_stdout_result(
         stdout_bytes[:head_bytes],
         stdout_bytes[-tail_bytes:],
         total_bytes=len(stdout_bytes),
     )
+    if _artifact_path:
+        metadata["artifact_path"] = _artifact_path
+        stdout_text_truncated += (
+            f"\n\n[Full output saved to: {_artifact_path}]"
+        )
+    return stdout_text_truncated, metadata
 
 # Environment variable scrubbing rules (shared between the local + remote
 # backends).  Secret-substring block is applied first; anything left must
@@ -756,17 +773,10 @@ def _rpc_server_loop(
                 # Suppress stdout/stderr from internal tool handlers so
                 # their status prints don't leak into the CLI spinner.
                 try:
-                    _real_stdout, _real_stderr = sys.stdout, sys.stderr
-                    devnull = open(os.devnull, "w", encoding="utf-8")
-                    try:
-                        sys.stdout = devnull
-                        sys.stderr = devnull
+                    with thread_scoped_silence():
                         result = handle_function_call(
                             tool_name, tool_args, task_id=task_id
                         )
-                    finally:
-                        sys.stdout, sys.stderr = _real_stdout, _real_stderr
-                        devnull.close()
                 except Exception as exc:
                     logger.error("Tool call failed in sandbox: %s", exc, exc_info=True)
                     result = tool_error(str(exc))
@@ -1038,17 +1048,10 @@ def _rpc_poll_loop(
 
                     # Dispatch through the standard tool handler
                     try:
-                        _real_stdout, _real_stderr = sys.stdout, sys.stderr
-                        devnull = open(os.devnull, "w", encoding="utf-8")
-                        try:
-                            sys.stdout = devnull
-                            sys.stderr = devnull
+                        with thread_scoped_silence():
                             tool_result = handle_function_call(
                                 tool_name, tool_args, task_id=task_id
                             )
-                        finally:
-                            sys.stdout, sys.stderr = _real_stdout, _real_stderr
-                            devnull.close()
                     except Exception as exc:
                         logger.error("Tool call failed in remote sandbox: %s",
                                      exc, exc_info=True)
@@ -1282,6 +1285,8 @@ def execute_code(
     code: str,
     task_id: Optional[str] = None,
     enabled_tools: Optional[List[str]] = None,
+    persist: bool = False,
+    session_id: Optional[str] = None,
 ) -> str:
     """
     Run a Python script in a sandboxed child process with RPC access
@@ -1295,6 +1300,9 @@ def execute_code(
         task_id:       Session task ID for tool isolation (terminal env, etc.).
         enabled_tools: Tool names enabled in the current session. The sandbox
                        gets the intersection with SANDBOX_ALLOWED_TOOLS.
+        persist:       If True, inject hermes_persist module so the script can
+                       save/load a pickled state file scoped to the session.
+        session_id:    Session ID for persist state file namespacing.
 
     Returns:
         JSON string with execution results.
@@ -1404,6 +1412,46 @@ def execute_code(
         tools_src = generate_hermes_tools_module(list(sandbox_tools))
         with open(os.path.join(tmpdir, "hermes_tools.py"), "w", encoding="utf-8") as f:
             f.write(tools_src)
+
+        # If persist=True, generate hermes_persist.py and set env var
+        # so user scripts can save/load pickled state across calls.
+        _persist_state_path = None
+        if persist:
+            try:
+                from hermes_constants import get_hermes_home
+                _session_dir = get_hermes_home() / "tmp" / f"session-{session_id or task_id or 'default'}"
+                _session_dir.mkdir(parents=True, exist_ok=True)
+                _persist_state_path = str(_session_dir / "persist_state.pkl")
+            except Exception:
+                pass
+
+            if _persist_state_path:
+                _persist_src = (
+                    "import pickle, os\n"
+                    f"_STATE_FILE = {_persist_state_path!r}\n\n"
+                    "def save_state(obj):\n"
+                    "    \"\"\"Save a Python object to the session persist file.\n"
+                    "    Use for heavy data (DataFrames, lists, dicts) you need\n"
+                    "    in the next execute_code call without re-sending in context.\"\"\"\n"
+                    "    with open(_STATE_FILE, 'wb') as f:\n"
+                    "        pickle.dump(obj, f)\n"
+                    "    return f'State saved ({os.path.getsize(_STATE_FILE)} bytes)'\n\n"
+                    "def load_state():\n"
+                    "    \"\"\"Load the previously saved persist state.\n"
+                    "    Returns None if no state has been saved yet.\"\"\"\n"
+                    "    if not os.path.exists(_STATE_FILE):\n"
+                    "        return None\n"
+                    "    with open(_STATE_FILE, 'rb') as f:\n"
+                    "        return pickle.load(f)\n\n"
+                    "def clear_state():\n"
+                    "    \"\"\"Delete the persist state file.\"\"\"\n"
+                    "    if os.path.exists(_STATE_FILE):\n"
+                    "        os.remove(_STATE_FILE)\n"
+                    "        return 'State cleared'\n"
+                    "    return 'No state to clear'\n"
+                )
+                with open(os.path.join(tmpdir, "hermes_persist.py"), "w", encoding="utf-8") as f:
+                    f.write(_persist_src)
 
         # Write the user's script
         with open(os.path.join(tmpdir, "script.py"), "w", encoding="utf-8") as f:
@@ -2057,7 +2105,13 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
         "is available for processing.\n\n"
         "Built-in helpers (no import): json_parse(text) — tolerant json.loads for "
         "terminal() output; shell_quote(s) — shlex.quote for dynamic shell args; "
-        "retry(fn, max_attempts=3, delay=2) — exponential backoff for transient failures."
+        "retry(fn, max_attempts=3, delay=2) — exponential backoff for transient failures.\n\n"
+        "PERSIST MODE: Set persist=true when working with heavy data (DataFrames, "
+        "large lists, ML models) across multiple execute_code calls. With persist=true, "
+        "a `hermes_persist` module is available: `from hermes_persist import save_state, "
+        "load_state; save_state(df)` saves data to a session-scoped file; the next "
+        "call with persist=true can `df = load_state()` without re-sending the data "
+        "in context. This saves significant tokens for data-heavy workflows."
     )
 
     return {
@@ -2073,6 +2127,18 @@ def build_execute_code_schema(enabled_sandbox_tools: set = None,
                         f"`from hermes_tools import {import_str}` "
                         "and print your final result to stdout."
                     ),
+                },
+                "persist": {
+                    "type": "boolean",
+                    "description": (
+                        "If true, save stdout to a session-scoped file "
+                        "(~/.hermes/tmp/session-<id>/last_output.pkl) so the "
+                        "next execute_code call with persist=true can load it "
+                        "via `from hermes_persist import load_output`. Use for "
+                        "heavy data (DataFrames, lists) that you need across "
+                        "calls without re-sending in context. Default: false."
+                    ),
+                    "default": False,
                 },
             },
             "required": ["code"],
@@ -2095,7 +2161,9 @@ registry.register(
     handler=lambda args, **kw: execute_code(
         code=args.get("code", ""),
         task_id=kw.get("task_id"),
-        enabled_tools=kw.get("enabled_tools")),
+        enabled_tools=kw.get("enabled_tools"),
+        persist=args.get("persist", False),
+        session_id=kw.get("session_id")),
     check_fn=check_sandbox_requirements,
     emoji="🐍",
     max_result_size_chars=100_000,

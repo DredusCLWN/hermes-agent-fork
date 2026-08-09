@@ -42,22 +42,67 @@ class CronScheduler:
         raise NotImplementedError
 
     def stop(self) -> None:
-        """Release resources. Called on shutdown."""
-        pass
+        """Optional eager teardown hook. Default no-op; setting the stop_event
+        is the primary stop signal. Override for providers holding external
+        resources (queue consumers, HTTP servers)."""
+        return None
+
+    # --- Optional hooks for external providers (added Phase 4). --------------
+    # All default-safe so the built-in inherits working behavior without
+    # overriding. Keep these NON-abstract — see test_abc_growth_stays_additive.
 
     def on_jobs_changed(self) -> None:
-        """Notify the provider that jobs were created/updated/removed.
-        External providers reconcile their armed one-shots here."""
-        pass
+        """Called after a successful store mutation (create/update/remove/
+        pause/resume). External providers reconcile their registry here (e.g.
+        Chronos re-provisions/cancels the affected one-shot via NAS).
+        Built-in: no-op (it re-reads jobs.json on every tick)."""
+        return None
+
+    def register_job(self, job: dict[str, Any]) -> None:
+        """Register the first external trigger for one newly persisted job.
+
+        The built-in provider reads the local store on every tick, so its
+        default is a no-op. External providers override this when creating a
+        job requires a remote registration before callers can honestly report
+        that the job is scheduled.
+        """
+        return None
+
+    def recover_interrupted(self) -> int:
+        """Run profile-local attempt recovery for every provider lifecycle."""
+        from cron.executions import recover_interrupted_executions
+
+        return recover_interrupted_executions()
 
     def fire_due(self, job_id: str, *, adapters: Any = None, loop: Any = None) -> bool:
-        """Run a single due job. Returns True if the job ran."""
-        from cron.jobs import get_job
+        """Run a single job NOW via the shared orchestrator. Called by the
+        inbound fire webhook when an external scheduler signals a job is due.
+
+        The default claims the job with a store-level compare-and-set
+        (multi-machine at-most-once), then runs it via the shared
+        ``run_one_job`` body. Built-in never calls this (it has its own tick
+        loop); an external provider routes its inbound fire here.
+
+        Returns True if THIS caller claimed and ran the job, False if the claim
+        was lost (another machine/retry won it) or the job no longer exists.
+        """
+        from cron.jobs import claim_job_for_fire, get_job
+        from cron.executions import create_execution
         from cron.scheduler import run_one_job
+
+        if not claim_job_for_fire(job_id):
+            return False  # another machine already claimed this fire
         job = get_job(job_id)
-        if not job:
-            return False
+        if job is None:
+            return False  # job removed (e.g. repeat-N exhausted) between arm and fire
+        job["execution_id"] = create_execution(job_id, source=self.name)["id"]
         return run_one_job(job, adapters=adapters, loop=loop)
+
+    def reconcile(self) -> None:
+        """Converge the external registry toward jobs.json (the desired state):
+        arm missing one-shots, cancel orphaned ones, re-arm changed times.
+        Built-in: no-op."""
+        return None
 
 
 class InProcessCronScheduler(CronScheduler):
