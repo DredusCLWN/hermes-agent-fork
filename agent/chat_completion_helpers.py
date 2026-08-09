@@ -100,6 +100,9 @@ def _maybe_dial_down_reasoning(agent, messages, base_config):
         "command not found", "no such file", "permission denied",
     )):
         return base_config
+    # Silent non-zero exit (grep no-match, curl -f, rsync, etc.)
+    if re.search(r'"exit_code":\s*[1-9]', content):
+        return base_config
     # Routine continuation — dial down
     effort = str(base_config.get("effort", "medium") or "medium").strip().lower()
     if effort in ("high", "xhigh", "max", "ultra", "medium"):
