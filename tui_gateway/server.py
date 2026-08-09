@@ -4980,6 +4980,47 @@ def _get_usage(agent) -> dict:
         "cost_status": getattr(agent, "session_cost_status", "unknown") or "unknown",
         "cost_source": getattr(agent, "session_cost_source", "none") or "none",
     }
+
+    # DB fallback: when in-memory counters are 0 (fresh restart), load
+    # persisted values from the sessions table so the tooltip doesn't
+    # show 0 until the agent processes a new message.
+    _sid = getattr(agent, "session_id", "") or ""
+    if _sid and not usage["input"] and not usage["output"]:
+        try:
+            import sqlite3 as _sqlite
+            from hermes_constants import get_hermes_home
+            _db_path = get_hermes_home() / "state.db"
+            if _db_path.exists():
+                _conn = _sqlite.connect(str(_db_path), timeout=2)
+                _cur = _conn.cursor()
+                _cur.execute(
+                    "SELECT input_tokens, output_tokens, cache_read_tokens, "
+                    "cache_write_tokens, reasoning_tokens, api_call_count, "
+                    "estimated_cost_usd "
+                    "FROM sessions WHERE id = ?",
+                    (_sid,)
+                )
+                _row = _cur.fetchone()
+                if _row:
+                    if not usage["input"]:
+                        usage["input"] = int(_row[0] or 0)
+                    if not usage["output"]:
+                        usage["output"] = int(_row[1] or 0)
+                    if not usage.get("cache_read"):
+                        usage["cache_read"] = int(_row[2] or 0)
+                    if not usage["cache_write"]:
+                        usage["cache_write"] = int(_row[3] or 0)
+                    if not usage["reasoning"]:
+                        usage["reasoning"] = int(_row[4] or 0)
+                    if not usage["calls"]:
+                        usage["calls"] = int(_row[5] or 0)
+                    if not usage["cost_usd"]:
+                        usage["cost_usd"] = round(float(_row[6] or 0), 6)
+                    if not usage["total"]:
+                        usage["total"] = usage["input"] + usage["output"] + usage["reasoning"]
+                _conn.close()
+        except Exception:
+            pass
     comp = getattr(agent, "context_compressor", None)
     if comp:
         # context_used is the *current-window* occupancy. Do NOT fall back to
@@ -5009,12 +5050,14 @@ def _get_usage(agent) -> dict:
             usage["context_percent"] = max(0, round(last_prompt / ctx_max * 100))
         usage["compressions"] = getattr(comp, "compression_count", 0) or 0
     # Token savings from optimization tools (caching, caveman, compression).
-    _cache_read = g("session_cache_read_tokens")
+    _cache_read = usage.get("cache_read") or g("session_cache_read_tokens")
     if _cache_read:
         usage["cache_read"] = _cache_read
     _compression_saved = 0
+    _compression_llm_cost = 0
     if comp:
         _cumulative = getattr(comp, "_compression_tokens_saved_total", 0) or 0
+        _compression_llm_cost = getattr(comp, "_compression_llm_cost_total", 0) or 0
         if _cumulative > 0:
             _compression_saved = _cumulative
         else:
@@ -5065,14 +5108,19 @@ def _get_usage(agent) -> dict:
 
     _total_savings = _cache_read + _caveman_saved + _compression_saved + _ponytail_saved + _terminal_tokens + _micro_compact
     _cleanup = getattr(agent, "_cleanup_metrics", {}) or {}
-    _cleanup_total = sum(_cleanup.values())
+    _cleanup_total = _cleanup.get("total_tokens_saved", 0) or sum(
+        v for k, v in _cleanup.items() if k != "total_tokens_saved"
+    )
     _total_savings += _cleanup_total
+    _net_savings = max(0, _total_savings - _compression_llm_cost)
     if _total_savings > 0:
-        usage["savings"] = _total_savings
+        usage["savings"] = _net_savings
+        usage["savings_gross"] = _total_savings
         usage["savings_breakdown"] = {
             "cache": _cache_read,
             "caveman": _caveman_saved,
             "compression": _compression_saved,
+            "compression_llm_cost": _compression_llm_cost,
             "ponytail": _ponytail_saved,
             "terminal_compression": _terminal_tokens,
             "micro_compact": _micro_compact,
