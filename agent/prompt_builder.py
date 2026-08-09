@@ -201,6 +201,15 @@ SKILLS_GUIDANCE = (
     "4. **DEDUP** — After reloading a pruned skill, **ignore any remaining `[SKILL_PRUNED]` markers for that same skill** — they are historical artifacts from previous compactions and do not need further action."
 )
 
+GRAPH_QUERY_GUIDANCE = (
+    "When working in a codebase with a graph index, use graph_query "
+    "mode='list' to discover architectural hubs, mode='query' to find "
+    "components by name, mode='path' to trace dependencies between two "
+    "components, and mode='explain' for a node's full connection list. "
+    "The graph covers the directory shown in the tool description scope — "
+    "check it before querying for symbols outside that scope."
+)
+
 KANBAN_GUIDANCE = (
     "# Kanban task execution protocol\n"
     "You have been assigned ONE task from "
@@ -2171,25 +2180,16 @@ def build_skills_system_prompt(
 
         result = (
             "## Skills (mandatory)\n"
-            "Before replying, scan the skills below. If a skill matches or is even partially relevant "
-            "to your task, you MUST load it with skill_view(name) and follow its instructions. "
-            "Err on the side of loading — it is always better to have context you don't need "
-            "than to miss critical steps, pitfalls, or established workflows. "
-            "Skills contain specialized knowledge — API endpoints, tool-specific commands, "
-            "and proven workflows that outperform general-purpose approaches. Load the skill "
-            "even if you think you could handle the task with basic tools like web_search or terminal. "
-            "Skills also encode the user's preferred approach, conventions, and quality standards "
-            "for tasks like code review, planning, and testing — load them even for tasks you "
-            "already know how to do, because the skill defines how it should be done here.\n"
-            "Whenever the user asks you to configure, set up, install, enable, disable, modify, "
-            "or troubleshoot Hermes Agent itself — its CLI, config, models, providers, tools, "
-            "skills, voice, gateway, plugins, or any feature — load the `hermes-agent` skill "
-            "first. It has the actual commands (e.g. `hermes config set …`, `hermes tools`, "
-            "`hermes setup`) so you don't have to guess or invent workarounds.\n"
-            "If a skill has issues, fix it with skill_manage(action='patch').\n"
-            "After difficult/iterative tasks, offer to save as a skill. "
-            "If a skill you loaded was missing steps, had wrong commands, or needed "
-            "pitfalls you discovered, update it before finishing.\n"
+            "Before replying, scan the skills below. If a skill matches or is even partially relevant, "
+            "load it with skill_view(name) and follow its instructions. Err on the side of loading — "
+            "skills contain specialized knowledge (API endpoints, tool commands, proven workflows) "
+            "that outperform general-purpose approaches, and encode the user's conventions and quality "
+            "standards. Load even for tasks you already know how to do.\n"
+            "For any Hermes Agent configuration/setup/troubleshooting, load the `hermes-agent` skill "
+            "first — it has the actual commands (`hermes config set …`, `hermes tools`, `hermes setup`).\n"
+            "If a skill has issues, fix it with skill_manage(action='patch'). "
+            "After difficult/iterative tasks, offer to save as a skill; "
+            "if a loaded skill was missing steps or had wrong commands, update it before finishing.\n"
             "\n"
             "<available_skills>\n"
             + "\n".join(index_lines) + "\n"

@@ -27,6 +27,7 @@ import asyncio
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 from tools.registry import (
@@ -548,6 +549,32 @@ def _compute_tool_definitions(
                         "function": {**td["function"], "description": desc},
                     }
                     break
+
+    # Inject graphify scope info into graph_query description so the model
+    # knows what project/ directory the graph covers and doesn't query for
+    # code that isn't indexed.
+    if "graph_query" in available_tool_names:
+        try:
+            from tools.graph_tool import _get_cache_dir
+            _meta_path = _get_cache_dir() / "metadata.json"
+            if _meta_path.exists():
+                import json as _json
+                _meta = _json.loads(_meta_path.read_text(encoding="utf-8"))
+                _scope_cwd = _meta.get("cwd", "")
+                _scope_nodes = _meta.get("node_count", 0)
+                _scope_name = Path(_scope_cwd).name if _scope_cwd else "unknown"
+                _scope_suffix = f" [Graph scope: {_scope_name}/ ({_scope_nodes} nodes). Use for dependency tracing and architectural discovery within this directory only.]"
+                for i, td in enumerate(filtered_tools):
+                    if td.get("function", {}).get("name") == "graph_query":
+                        _desc = td["function"].get("description", "")
+                        if "[Graph scope:" not in _desc:
+                            filtered_tools[i] = {
+                                "type": "function",
+                                "function": {**td["function"], "description": _desc + _scope_suffix},
+                            }
+                        break
+        except Exception:
+            pass
 
     if not quiet_mode:
         if filtered_tools:

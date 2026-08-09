@@ -1122,6 +1122,7 @@ def _restore_or_build_system_prompt(agent, system_message, conversation_history)
             session_id=agent.session_id,
             model=agent.model,
             platform=getattr(agent, "platform", None) or "",
+            cwd=getattr(agent, "_launch_cwd", "") or os.getcwd(),
         )
     except Exception as exc:
         logger.warning("on_session_start hook failed: %s", exc)
@@ -1951,6 +1952,24 @@ def run_conversation(
     _plugin_user_context = _ctx.plugin_user_context
     _ext_prefetch_cache = _ctx.ext_prefetch_cache
 
+    # Register this session in the live session registry for inter-agent
+    # messaging (agent_message tool).  Safe to call every turn — updates
+    # metadata only if already registered.
+    try:
+        from agent.live_session_registry import register_session, mark_busy
+        _is_child = getattr(agent, "_is_delegated_child", False)
+        register_session(
+            agent,
+            session_id=agent.session_id,
+            role="child" if _is_child else "root",
+            parent_session_id=getattr(agent, "_parent_session_id", None),
+            model=getattr(agent, "model", None),
+            platform=getattr(agent, "platform", None),
+        )
+        mark_busy(agent.session_id, True)
+    except Exception:
+        logger.debug("live_session_registry register failed", exc_info=True)
+
     # Commentary deduplication spans all provider continuations and tool calls
     # within one user turn, but must not suppress the same phrase next turn.
     agent._delivered_interim_texts = set()
@@ -2314,21 +2333,34 @@ def run_conversation(
             # The signature field helps maintain reasoning continuity
             api_messages.append(api_msg)
 
-                # Lightweight cleanup — operates on per-request copies only.
+        # Lightweight cleanup — operates on per-request copies only.
         # Stored history (and prompt-cache prefix) is never mutated.
-        # Each function returns chars saved; convert to tokens once.
+        # Each function returns chars saved; tokens are computed via
+        # estimate_messages_tokens_rough for language-aware accuracy.
+        _cleanup_tokens_before = estimate_messages_tokens_rough(api_messages)
         agent._cleanup_metrics = getattr(agent, '_cleanup_metrics', {}) or {}
-        agent._cleanup_metrics['dedup'] = _dedup_tool_results(api_messages) // 4
-        agent._cleanup_metrics['whitespace'] = _normalize_tool_whitespace(api_messages) // 4
-        agent._cleanup_metrics['json_compact'] = _compact_json_tool_output(api_messages) // 4
-        agent._cleanup_metrics['json_table'] = _compact_json_table(api_messages) // 4
-        agent._cleanup_metrics['repeated_lines'] = _aggregate_repeated_lines(api_messages) // 4
-        agent._cleanup_metrics['reasoning_strip'] = _strip_old_reasoning(api_messages) // 4
-        agent._cleanup_metrics['read_file_dedup'] = _dedup_read_file_results(api_messages) // 4
-        agent._cleanup_metrics['empty_strip'] = _strip_empty_tool_results(api_messages) // 4
-        agent._cleanup_metrics['terminal_truncate'] = _truncate_old_terminal(api_messages) // 4
-        agent._cleanup_metrics['json_aggressive'] = _compact_json_aggressive(api_messages) // 4
-# Expose cleanup metrics for the gateway usage computation.
+        _cleanup_chars: dict[str, int] = {}
+        _cleanup_chars['dedup'] = _dedup_tool_results(api_messages)
+        _cleanup_chars['whitespace'] = _normalize_tool_whitespace(api_messages)
+        _cleanup_chars['json_compact'] = _compact_json_tool_output(api_messages)
+        _cleanup_chars['json_table'] = _compact_json_table(api_messages)
+        _cleanup_chars['repeated_lines'] = _aggregate_repeated_lines(api_messages)
+        _cleanup_chars['reasoning_strip'] = _strip_old_reasoning(api_messages)
+        _cleanup_chars['read_file_dedup'] = _dedup_read_file_results(api_messages)
+        _cleanup_chars['empty_strip'] = _strip_empty_tool_results(api_messages)
+        _cleanup_chars['terminal_truncate'] = _truncate_old_terminal(api_messages)
+        _cleanup_chars['json_aggressive'] = _compact_json_aggressive(api_messages)
+        _total_chars_saved = sum(_cleanup_chars.values())
+        _cleanup_tokens_after = estimate_messages_tokens_rough(api_messages)
+        _total_tokens_saved = max(0, _cleanup_tokens_before - _cleanup_tokens_after)
+        if _total_chars_saved > 0:
+            for _k, _chars in _cleanup_chars.items():
+                agent._cleanup_metrics[_k] = (_chars * _total_tokens_saved) // _total_chars_saved
+        else:
+            for _k in _cleanup_chars:
+                agent._cleanup_metrics[_k] = 0
+        agent._cleanup_metrics['total_tokens_saved'] = _total_tokens_saved
+        # Expose cleanup metrics for the gateway usage computation.
         
 
         # Build the final system message: cached prompt + ephemeral system prompt.
@@ -8105,6 +8137,18 @@ def run_conversation(
                 messages.append({"role": "assistant", "content": final_response})
                 break
     
+    # Mark session as idle in the live registry and drain any pending
+    # inter-agent messages that arrived during this turn.
+    try:
+        from agent.live_session_registry import mark_busy, drain_pending_messages
+        mark_busy(agent.session_id, False)
+        _pending = drain_pending_messages(agent.session_id)
+        if _pending:
+            logger.debug("drained %d pending agent messages for %s",
+                         len(_pending), agent.session_id)
+    except Exception:
+        logger.debug("live_session_registry mark_busy/drain failed", exc_info=True)
+
     # Post-loop turn finalization extracted to agent/turn_finalizer.finalize_turn
     # (god-file decomposition Phase 1 step 4). Behavior-neutral: the assembled
     # result dict is returned exactly as before.

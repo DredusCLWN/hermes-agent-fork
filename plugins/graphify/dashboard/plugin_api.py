@@ -124,18 +124,25 @@ def _save_metadata(data: Dict[str, Any]) -> None:
             pass
 
 
+_SKIP_DIRS = {"node_modules", "__pycache__", "venv", ".venv", "dist", "build", "target", ".git", ".hg", ".svn", "Library", "Temp", "Logs"}
+
+
 def _detect_code_files(cwd: Path) -> bool:
-    """Return True if cwd contains at least one code file (shallow scan)."""
+    """Return True if cwd contains at least one code file (scan up to 3 levels deep)."""
     try:
         for entry in sorted(cwd.iterdir()):
             if entry.is_file() and entry.suffix.lower() in _CODE_EXTENSIONS:
                 return True
-            # Check one level deep for common source directories
-            if entry.is_dir() and not entry.name.startswith(".") and entry.name not in {"node_modules", "__pycache__", "venv", ".venv", "dist", "build", "target"}:
+            # Check up to 3 levels deep for source directories
+            if entry.is_dir() and not entry.name.startswith(".") and entry.name not in _SKIP_DIRS:
                 try:
                     for child in entry.iterdir():
                         if child.is_file() and child.suffix.lower() in _CODE_EXTENSIONS:
                             return True
+                        if child.is_dir() and not child.name.startswith(".") and child.name not in _SKIP_DIRS:
+                            for grandchild in child.iterdir():
+                                if grandchild.is_file() and grandchild.suffix.lower() in _CODE_EXTENSIONS:
+                                    return True
                 except (OSError, PermissionError):
                     continue
     except (OSError, PermissionError):
