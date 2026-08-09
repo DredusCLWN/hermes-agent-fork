@@ -1074,10 +1074,6 @@ def _run_review_in_thread(
                 review_agent.close()
             except Exception:
                 pass
-            # Restore the shared MemoryStore's write_origin so foreground
-            # writes after the review are tagged correctly.
-            if agent._memory_store:
-                agent._memory_store._write_origin = getattr(agent, "_memory_write_origin", "assistant_tool")
             review_agent = None
 
         # ── Skill gate: validate and revert rejected edits ──
@@ -1165,9 +1161,6 @@ def _run_review_in_thread(
                         pass
             except Exception:
                 pass
-        # Restore write_origin on exception path too
-        if agent._memory_store:
-            agent._memory_store._write_origin = getattr(agent, "_memory_write_origin", "assistant_tool")
         # Clear the approval callback on this bg-review thread so a
         # recycled thread-id doesn't inherit a stale reference.
         try:

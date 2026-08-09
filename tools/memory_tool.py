@@ -26,6 +26,7 @@ Design:
 import json
 import logging
 import re
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -177,6 +178,27 @@ class MemoryStore:
         # Keyed by entry content hash → {session_id, timestamp, action, context}
         self._provenance: Dict[str, Dict[str, Any]] = {}
         self._load_provenance()
+        # Thread-local provenance context: _write_origin and _session_id are
+        # per-thread so the background review fork can tag its writes as
+        # "background_review" without mutating the foreground thread's values.
+        # Eliminates the sync→restore race when parent and review run concurrently.
+        self._tl = threading.local()
+
+    @property
+    def _write_origin(self) -> str:
+        return getattr(self._tl, "write_origin", "")
+
+    @_write_origin.setter
+    def _write_origin(self, v: str) -> None:
+        self._tl.write_origin = v
+
+    @property
+    def _session_id(self) -> str:
+        return getattr(self._tl, "session_id", "")
+
+    @_session_id.setter
+    def _session_id(self, v: str) -> None:
+        self._tl.session_id = v
 
     def reset_consolidation_failures(self) -> None:
         """Reset the per-turn consolidation-failure counter (call at turn start)."""
@@ -395,20 +417,12 @@ class MemoryStore:
 
     def _record_provenance(self, action: str, target: str, content: str) -> None:
         """Record where a memory entry came from."""
-        ctx = {}
-        try:
-            ctx["session_id"] = getattr(self, "_session_id", "") or ""
-        except Exception:
-            pass
-        try:
-            ctx["write_origin"] = getattr(self, "_write_origin", "") or ""
-        except Exception:
-            pass
         self._provenance[self._entry_hash(content)] = {
             "action": action,
             "target": target,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            **ctx,
+            "session_id": self._session_id,
+            "write_origin": self._write_origin,
         }
         self._save_provenance()
 
