@@ -26,7 +26,7 @@ import { CopyButton } from '@/components/ui/copy-button'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { BarChart3, GitForkIcon, Loader2Icon, RefreshCwIcon, XIcon, Zap } from '@/lib/icons'
+import { BarChart3, GitForkIcon, RefreshCwIcon, XIcon, Zap } from '@/lib/icons'
 import { extractPreviewTargets } from '@/lib/preview-targets'
 import { formatAgo } from '@/lib/time'
 import { useEnterAnimation } from '@/lib/use-enter-animation'
@@ -186,6 +186,7 @@ const TokenSavings: FC = () => {
     { key: 'caveman', label: 'Caveman', value: breakdown.caveman ?? 0 },
     { key: 'ponytail', label: 'Ponytail', value: breakdown.ponytail ?? 0 },
     { key: 'compression', label: 'Compression', value: breakdown.compression ?? 0 },
+    { key: 'compression_llm_cost', label: 'Compression cost', value: -(breakdown.compression_llm_cost ?? 0) },
     { key: 'terminal_compression', label: 'Terminal compress', value: breakdown.terminal_compression ?? 0 },
     { key: 'micro_compact', label: 'Micro-compact', value: breakdown.micro_compact ?? 0 },
     { key: 'cleanup_dedup', label: 'Tool dedup', value: breakdown.cleanup_dedup ?? 0 },

@@ -5112,9 +5112,8 @@ def _get_usage(agent) -> dict:
         v for k, v in _cleanup.items() if k != "total_tokens_saved"
     )
     _total_savings += _cleanup_total
-    _net_savings = max(0, _total_savings - _compression_llm_cost)
     if _total_savings > 0:
-        usage["savings"] = _net_savings
+        usage["savings"] = _total_savings
         usage["savings_gross"] = _total_savings
         usage["savings_breakdown"] = {
             "cache": _cache_read,

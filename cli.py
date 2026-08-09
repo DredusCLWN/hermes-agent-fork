@@ -5590,7 +5590,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin):
                 tally.input_tokens = max(0, (getattr(agent, "session_input_tokens", 0) or 0) - baseline_in)
                 tally.output_tokens = max(0, (getattr(agent, "session_output_tokens", 0) or 0) - baseline_out)
                 # Compression savings from context compressor
-                compressor = getattr(agent, "_context_engine", None)
+                compressor = getattr(agent, "context_compressor", None)
                 if compressor is not None:
                     cumulative_saved = getattr(compressor, "_cumulative_tokens_saved", 0) or 0
                     savings_pct = getattr(compressor, "_last_compression_savings_pct", 0) or 0
