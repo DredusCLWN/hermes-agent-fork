@@ -1122,7 +1122,7 @@ def _restore_or_build_system_prompt(agent, system_message, conversation_history)
             session_id=agent.session_id,
             model=agent.model,
             platform=getattr(agent, "platform", None) or "",
-            cwd=getattr(agent, "_launch_cwd", "") or os.getcwd(),
+            cwd=os.getcwd(),  # graph = backend launch dir
         )
     except Exception as exc:
         logger.warning("on_session_start hook failed: %s", exc)

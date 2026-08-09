@@ -180,6 +180,11 @@ def _needs_reindex(cwd: str) -> bool:
             )
             if code_changed:
                 return True
+        elif result.returncode != 0:
+            # git error (shallow clone with no HEAD~1, etc.) — mtime fallback
+            last_build = meta.get("completed_at", 0)
+            if time.time() - last_build > 3600:  # 1 hour
+                return True
     except (OSError, subprocess.SubprocessError, FileNotFoundError):
         # No git or git error — check mtime staleness
         last_build = meta.get("completed_at", 0)
