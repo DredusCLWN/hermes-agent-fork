@@ -4323,6 +4323,8 @@ class AIAgent:
             lower = token.lower()
             if lower in self._SPECULATIVE_STOPWORDS or lower in user_tokens:
                 continue
+            if token.isdigit():
+                continue
             freq[lower] = freq.get(lower, 0) + 1
         if not freq:
             return ""

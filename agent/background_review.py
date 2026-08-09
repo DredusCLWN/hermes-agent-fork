@@ -111,6 +111,7 @@ def _resolve_review_runtime(agent: Any) -> Dict[str, Any]:
             "max_tokens": rp.get("max_output_tokens"),
             "command": rp.get("command"),
             "args": list(rp.get("args") or []),
+            "reasoning_effort": str(task.get("reasoning_effort", "")).strip().lower() or None,
             "routed": True,
         }
     except Exception as e:
@@ -806,6 +807,11 @@ def _run_review_in_thread(
                     _pref_val = getattr(agent, _pref_attr, None)
                     if _pref_val:
                         _fork_kwargs[_pref_attr] = _pref_val
+            else:
+                # Routed fork: apply per-task reasoning_effort if configured
+                _effort = _rt.get("reasoning_effort")
+                if _effort:
+                    _fork_kwargs["reasoning_config"] = {"effort": _effort}
             review_agent = AIAgent(
                 model=_rt.get("model") or agent.model,
                 max_iterations=16,

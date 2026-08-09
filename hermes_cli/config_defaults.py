@@ -1110,7 +1110,7 @@ DEFAULT_CONFIG = {
             "api_key": "",
             "timeout": 120,
             "extra_body": {},
-            "reasoning_effort": "minimal",  # review = fact extraction, not deep reasoning — saves tokens
+            "reasoning_effort": "",  # per-task thinking level: none|minimal|low|medium|high|xhigh|max|ultra (empty = provider default)
         },
         "moa_reference": {
             "provider": "auto",
