@@ -1927,10 +1927,27 @@ def _(rid, params: dict) -> dict:
     # DB fallback for compression stats when agent is None or freshly restarted
     if not compressions and key:
         try:
-            with _session_db(session) as _db:
-                if _db is not None:
-                    compressions = int(_db.get_compression_total_count(key) or 0)
-                    cumulative_saved = int(_db.get_cumulative_tokens_saved(key) or 0)
+            import sqlite3 as _sqlite
+            from hermes_constants import get_hermes_home
+            db_path = get_hermes_home() / "state.db"
+            if db_path.exists():
+                _conn = _sqlite.connect(str(db_path), timeout=2)
+                _cur = _conn.cursor()
+                _cur.execute(
+                    "SELECT compression_total_count, cumulative_tokens_saved, "
+                    "compression_ineffective_count, compression_fallback_streak "
+                    "FROM sessions WHERE id = ?",
+                    (key,)
+                )
+                _row = _cur.fetchone()
+                if _row:
+                    compressions = int(_row[0] or 0)
+                    cumulative_saved = int(_row[1] or 0)
+                    if not ineffective:
+                        ineffective = int(_row[2] or 0)
+                    if not fallback_streak:
+                        fallback_streak = int(_row[3] or 0)
+                _conn.close()
         except Exception:
             pass
 
@@ -1977,7 +1994,7 @@ def _(rid, params: dict) -> dict:
         if prompt_tok:
             lines.append(f"    │  ├─ Prompt:    {_fmt_tok(prompt_tok)}")
         if cache_read:
-            cache_pct = (cache_read / in_tok * 100) if in_tok > 0 else 0
+            cache_pct = min(100, (cache_read / in_tok * 100)) if in_tok > 0 else 0
             lines.append(f"    │  ├─ Cache read: {_fmt_tok(cache_read)}  ({cache_pct:.0f}%)")
         if cache_write:
             lines.append(f"    │  ├─ Cache write: {_fmt_tok(cache_write)}")
