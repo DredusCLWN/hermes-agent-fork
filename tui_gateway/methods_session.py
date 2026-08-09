@@ -2182,7 +2182,10 @@ def _(rid, params: dict) -> dict:
         else:
             lines.append("  Compression:     ✓ healthy")
     else:
-        lines.append("  Compression:     (none yet)")
+        if agent is None:
+            lines.append("  Compression:     (no data — session inactive)")
+        else:
+            lines.append("  Compression:     (none yet)")
     if ineffective <= 2:
         lines.append("  Anti-thrash:     ✓ OK")
     else:
