@@ -994,7 +994,7 @@ def _run_review_in_thread(
         # ── Skill gate: validate and revert rejected edits ──
         if _skill_snapshot_before:
             try:
-                _, _gate_results = run_skill_gate(_skill_snapshot_before)
+                _, _gate_results = run_skill_gate(_skill_snapshot_before, agent=agent)
             except Exception as exc:
                 logger.debug("skill_gate: post-review gate failed: %s", exc)
 

@@ -1,9 +1,9 @@
-"""Skill validation gate — lightweight quality control for background review.
+"""Skill validation gate — quality control for background review.
 
 Inspired by SkillOpt (Microsoft): validation gate, learning-rate budget,
-and rejected-edit buffer for skill edits made by background_review.
+rejected-edit buffer, and held-out evaluation for skill edits.
 
-Three layers of defense against skill bloat and garbage:
+Four layers of defense against skill bloat and garbage:
 
 1. **Learning-rate budget** — limit how much a single review pass can
    change a skill file.  If the delta exceeds ``_MAX_SKILL_EDIT_TOKENS``,
@@ -15,6 +15,13 @@ Three layers of defense against skill bloat and garbage:
 3. **Rejected-edit buffer** — rejected edits are stored in a JSON file
    so future review passes can check if a similar edit was already
    rejected and skip it, or re-evaluate if enough context has changed.
+
+4. **Held-out validation gate** — for modified skills, extract test cases
+   from past sessions in state.db.  Evaluate old vs new skill content on
+   those test cases via a single auxiliary LLM call each.  Accept the
+   edit only if the new skill scores equal or higher than the old one.
+   This prevents edits that look plausible but actually degrade the
+   skill's usefulness on real tasks.
 """
 
 from __future__ import annotations
@@ -448,24 +455,254 @@ def mine_recurring_tasks(
     return result[:5]
 
 
+# ── Held-out validation gate ───────────────────────────────────────────────
+
+# Number of test cases to extract from past sessions for evaluation.
+# More = better signal but more API cost. 2 is a good balance.
+_HELD_OUT_TEST_COUNT = 2
+
+# Minimum length for a user message to be considered a valid test case.
+_MIN_TEST_CASE_CHARS = 30
+
+# Maximum length for a test case (truncated to keep API cost low).
+_MAX_TEST_CASE_CHARS = 500
+
+# Timeout for the evaluation LLM call.
+_EVAL_TIMEOUT = 30.0
+
+
+def extract_test_cases(
+    session_db: Any,
+    current_session_id: str,
+    n: int = _HELD_OUT_TEST_COUNT,
+) -> List[str]:
+    """Extract held-out test cases from past sessions in state.db.
+
+    Picks representative user messages from sessions OTHER than the
+    current one — these are "held-out" because the review agent never
+    saw them during the current turn.
+
+    Returns a list of user message strings (truncated to _MAX_TEST_CASE_CHARS).
+    """
+    if session_db is None or not current_session_id:
+        return []
+    try:
+        cutoff = time.time() - (168 * 3600)  # 7 days
+        rows = session_db._execute_read_all(
+            "SELECT id FROM sessions "
+            "WHERE started_at > ? AND parent_session_id IS NULL "
+            "AND id != ? "
+            "ORDER BY started_at DESC LIMIT 20",
+            (cutoff, current_session_id),
+        )
+        if not rows:
+            return []
+
+        candidates: List[str] = []
+        for row in rows:
+            sid = row["id"] if isinstance(row, dict) else row[0]
+            if sid == current_session_id:
+                continue
+            msgs = session_db._execute_read_all(
+                "SELECT content FROM messages "
+                "WHERE session_id = ? AND role = 'user' AND active = 1 "
+                "ORDER BY id LIMIT 3",
+                (sid,),
+            )
+            if not msgs:
+                continue
+            for m in msgs:
+                content = m["content"] if isinstance(m, dict) else m[0]
+                if not isinstance(content, str):
+                    continue
+                content = content.strip()
+                if len(content) >= _MIN_TEST_CASE_CHARS:
+                    candidates.append(content[:_MAX_TEST_CASE_CHARS])
+
+        if not candidates:
+            return []
+
+        # Pick diverse test cases: spread across the candidate list
+        # rather than taking the first N (which might all be from one session).
+        step = max(1, len(candidates) // n)
+        selected = candidates[::step][:n]
+        return selected
+
+    except Exception as exc:
+        logger.debug("skill_gate: extract_test_cases failed: %s", exc)
+        return []
+
+
+def _evaluate_skill_on_task(
+    skill_name: str,
+    skill_content: str,
+    task: str,
+    main_runtime: Optional[Dict[str, Any]] = None,
+) -> Optional[int]:
+    """Evaluate how well a skill covers a task. Returns 1-10 score or None.
+
+    Uses a single auxiliary LLM call with a compact prompt. The LLM is
+    asked to rate the skill's relevance and usefulness for the given task.
+    """
+    try:
+        from agent.auxiliary_client import call_llm
+
+        prompt = (
+            f"You are evaluating a skill document for an AI agent.\n\n"
+            f"SKILL NAME: {skill_name}\n"
+            f"SKILL CONTENT:\n{skill_content[:2000]}\n\n"
+            f"TASK (from a real user session):\n{task}\n\n"
+            f"Rate how well this skill helps the agent handle this task.\n"
+            f"Consider: relevance, completeness, actionability.\n"
+            f"Respond with ONLY a single integer 1-10. No explanation."
+        )
+
+        response = call_llm(
+            task="skill_validation",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=10,
+            temperature=0.0,
+            timeout=_EVAL_TIMEOUT,
+            main_runtime=main_runtime,
+        )
+
+        text = ""
+        if hasattr(response, "choices") and response.choices:
+            text = response.choices[0].message.content or ""
+        elif isinstance(response, dict):
+            text = response.get("content", "") or response.get("text", "")
+        elif isinstance(response, str):
+            text = response
+
+        text = text.strip()
+        match = re.search(r"\b(\d{1,2})\b", text)
+        if match:
+            score = int(match.group(1))
+            return max(1, min(10, score))
+        return None
+
+    except Exception as exc:
+        logger.debug("skill_gate: evaluate_skill failed: %s", exc)
+        return None
+
+
+def validate_with_held_out(
+    before: Dict[str, Dict[str, Any]],
+    after: Dict[str, Dict[str, Any]],
+    test_cases: List[str],
+    main_runtime: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """Run held-out validation on modified skills.
+
+    For each skill that was modified (not new, not deleted), evaluates
+    old vs new content on the test cases. Returns a list of results:
+    ``{"skill": name, "action": "revert"|"keep", "reason": str, scores}``
+
+    Only runs if there are test cases AND modified skills. If evaluation
+    fails (API error, parse error), the edit is kept (fail-open, not
+    fail-closed — we don't want a transient API issue to block all
+    skill improvements).
+    """
+    if not test_cases:
+        return []
+
+    # Find modified skills that passed the static gate
+    modified: List[Tuple[str, Dict[str, Any], Dict[str, Any]]] = []
+    for name, after_info in after.items():
+        if name not in before:
+            continue
+        before_info = before[name]
+        if before_info["content"] == after_info["content"]:
+            continue
+        modified.append((name, before_info, after_info))
+
+    if not modified:
+        return []
+
+    results: List[Dict[str, Any]] = []
+
+    for name, old_info, new_info in modified:
+        old_content = old_info["content"]
+        new_content = new_info["content"]
+
+        old_scores: List[Optional[int]] = []
+        new_scores: List[Optional[int]] = []
+
+        for task in test_cases:
+            old_score = _evaluate_skill_on_task(name, old_content, task, main_runtime)
+            new_score = _evaluate_skill_on_task(name, new_content, task, main_runtime)
+            old_scores.append(old_score)
+            new_scores.append(new_score)
+
+        # Calculate averages (ignoring None = failed evaluations)
+        old_valid = [s for s in old_scores if s is not None]
+        new_valid = [s for s in new_scores if s is not None]
+
+        # Fail-open: if we couldn't get any valid scores for new, keep the edit
+        if not new_valid:
+            results.append({
+                "skill": name,
+                "action": "keep",
+                "reason": "held_out_eval_failed:fail_open",
+                "old_scores": old_scores,
+                "new_scores": new_scores,
+            })
+            continue
+
+        old_avg = sum(old_valid) / len(old_valid) if old_valid else 0
+        new_avg = sum(new_valid) / len(new_valid)
+
+        # Accept if new >= old (equal is OK — the static gate already
+        # validated size/dedup/budget, held-out just adds quality signal)
+        if new_avg >= old_avg:
+            results.append({
+                "skill": name,
+                "action": "keep",
+                "reason": f"held_out_ok:old={old_avg:.1f}>=new={new_avg:.1f}",
+                "old_scores": old_scores,
+                "new_scores": new_scores,
+                "old_avg": old_avg,
+                "new_avg": new_avg,
+            })
+        else:
+            results.append({
+                "skill": name,
+                "action": "revert",
+                "reason": f"held_out_degraded:old={old_avg:.1f}>new={new_avg:.1f}",
+                "path": str(new_info["path"]),
+                "old_content": old_content,
+                "new_content": new_content,
+                "old_scores": old_scores,
+                "new_scores": new_scores,
+                "old_avg": old_avg,
+                "new_avg": new_avg,
+            })
+
+    return results
+
+
 # ── Full gate pipeline ─────────────────────────────────────────────────────
 
 def run_skill_gate(
     before: Dict[str, Dict[str, Any]],
+    agent: Any = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
     """Run the full validation gate after a background review.
 
     Takes the ``before`` snapshot (from ``snapshot_skills()``) and:
     1. Takes an ``after`` snapshot
-    2. Validates all edits
-    3. Reverts rejected edits
-    4. Adds rejected edits to the buffer
+    2. Validates all edits (static gate: size, dedup, budget, deletions)
+    3. Reverts rejected edits from static gate
+    4. If agent provided: runs held-out validation on surviving edits
+    5. Reverts edits that degraded held-out scores
+    6. Adds all rejected edits to the buffer
 
     Returns ``(after_snapshot, validation_results)``.
     """
     after = snapshot_skills()
     results = validate_skill_edits(before, after)
 
+    # Phase 1: static gate reverts
     for r in results:
         if r["action"] != "revert":
             continue
@@ -474,20 +711,42 @@ def run_skill_gate(
         old_content = r.get("old_content")
         new_content = r.get("new_content") or r.get("content", "")
 
-        # Revert
         revert_skill(skill_path, old_content=old_content, delete_if_new=(old_content is None))
-
-        # Add to rejected buffer
         add_to_rejected_buffer(skill_name, r["reason"], new_content, old_content)
+        logger.info("skill_gate: REJECTED edit to '%s' — %s", skill_name, r["reason"])
 
-        logger.info(
-            "skill_gate: REJECTED edit to '%s' — %s",
-            skill_name, r["reason"],
-        )
-
-    # Re-snapshot after reverts to get clean state
+    # Re-snapshot after static reverts
     if any(r["action"] == "revert" for r in results):
         after = snapshot_skills()
+
+    # Phase 2: held-out validation gate (only if agent provided)
+    if agent is not None:
+        session_db = getattr(agent, "_session_db", None)
+        session_id = getattr(agent, "session_id", "")
+        if session_db and session_id:
+            test_cases = extract_test_cases(session_db, session_id)
+            if test_cases:
+                main_runtime = agent._current_main_runtime() if hasattr(agent, "_current_main_runtime") else None
+                held_out_results = validate_with_held_out(before, after, test_cases, main_runtime)
+
+                for r in held_out_results:
+                    results.append(r)
+                    if r["action"] != "revert":
+                        continue
+                    skill_name = r["skill"]
+                    skill_path = Path(r["path"])
+                    old_content = r.get("old_content")
+                    new_content = r.get("new_content", "")
+
+                    revert_skill(skill_path, old_content=old_content, delete_if_new=False)
+                    add_to_rejected_buffer(skill_name, r["reason"], new_content, old_content)
+                    logger.info(
+                        "skill_gate: HELD-OUT REJECTED edit to '%s' — %s",
+                        skill_name, r["reason"],
+                    )
+
+                if any(r["action"] == "revert" for r in held_out_results):
+                    after = snapshot_skills()
 
     return after, results
 
@@ -497,12 +756,18 @@ def format_gate_report(results: List[Dict[str, Any]]) -> str:
     if not results:
         return ""
     reverted = [r for r in results if r["action"] == "revert"]
-    kept = [r for r in results if r["action"] == "keep"]
     if not reverted:
         return ""
     lines = ["  🚫 Skill gate rejected:"]
     for r in reverted:
-        lines.append(f"    • {r['skill']}: {r['reason']}")
+        reason = r["reason"]
+        if "held_out" in reason and "old_avg" in r:
+            lines.append(
+                f"    • {r['skill']}: {reason} "
+                f"(old {r['old_avg']:.1f} → new {r['new_avg']:.1f})"
+            )
+        else:
+            lines.append(f"    • {r['skill']}: {reason}")
     return "\n".join(lines)
 
 
@@ -560,4 +825,6 @@ __all__ = [
     "build_budget_instruction",
     "get_rejected_summary",
     "mine_recurring_tasks",
+    "extract_test_cases",
+    "validate_with_held_out",
 ]
