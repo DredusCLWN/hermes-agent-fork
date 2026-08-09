@@ -25,6 +25,7 @@ Design:
 
 import json
 import logging
+import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -172,6 +173,10 @@ class MemoryStore:
         # Per-turn counter of failed at-capacity consolidation attempts; reset
         # at each turn boundary by reset_consolidation_failures() (#42405).
         self._consolidation_failures = 0
+        # Provenance: sidecar JSON tracking where each entry came from.
+        # Keyed by entry content hash → {session_id, timestamp, action, context}
+        self._provenance: Dict[str, Dict[str, Any]] = {}
+        self._load_provenance()
 
     def reset_consolidation_failures(self) -> None:
         """Reset the per-turn consolidation-failure counter (call at turn start)."""
@@ -360,6 +365,53 @@ class MemoryStore:
         self._set_entries(target, fresh)
         return bak
 
+    # -- Provenance sidecar -------------------------------------------------
+
+    def _provenance_path(self) -> Path:
+        return get_memory_dir() / ".provenance.json"
+
+    def _load_provenance(self) -> None:
+        """Load provenance sidecar if it exists."""
+        try:
+            p = self._provenance_path()
+            if p.exists():
+                self._provenance = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            self._provenance = {}
+
+    def _save_provenance(self) -> None:
+        """Persist provenance to sidecar JSON."""
+        try:
+            p = self._provenance_path()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(json.dumps(self._provenance, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            logger.debug("provenance save failed (non-fatal)", exc_info=True)
+
+    @staticmethod
+    def _entry_hash(content: str) -> str:
+        import hashlib
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+    def _record_provenance(self, action: str, target: str, content: str) -> None:
+        """Record where a memory entry came from."""
+        ctx = {}
+        try:
+            ctx["session_id"] = getattr(self, "_session_id", "") or ""
+        except Exception:
+            pass
+        try:
+            ctx["write_origin"] = getattr(self, "_write_origin", "") or ""
+        except Exception:
+            pass
+        self._provenance[self._entry_hash(content)] = {
+            "action": action,
+            "target": target,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            **ctx,
+        }
+        self._save_provenance()
+
     def save_to_disk(self, target: str):
         """Persist entries to the appropriate file. Called after every mutation."""
         get_memory_dir().mkdir(parents=True, exist_ok=True)
@@ -393,6 +445,31 @@ class MemoryStore:
         if target == "user":
             return self.user_entries
         return self.memory_entries
+
+    @staticmethod
+    def _tokenize(text: str) -> set:
+        """Lowercase word-level tokens for similarity comparison."""
+        return set(re.findall(r"\w{2,}", text.lower()))
+
+    @staticmethod
+    def _jaccard(a: set, b: set) -> float:
+        if not a and not b:
+            return 1.0
+        if not a or not b:
+            return 0.0
+        return len(a & b) / len(a | b)
+
+    _NEAR_DUP_THRESHOLD = 0.7
+
+    def _find_near_duplicate(self, content: str, entries: List[str]) -> Optional[str]:
+        """Return the first entry with Jaccard >= 0.7, or None."""
+        content_tokens = self._tokenize(content)
+        if not content_tokens:
+            return None
+        for entry in entries:
+            if self._jaccard(content_tokens, self._tokenize(entry)) >= self._NEAR_DUP_THRESHOLD:
+                return entry
+        return None
 
     def _set_entries(self, target: str, entries: List[str]):
         if target == "user":
@@ -445,6 +522,19 @@ class MemoryStore:
             if content in entries:
                 return self._success_response(target, "Entry already exists (no duplicate added).")
 
+            # Reject near-duplicates (Jaccard similarity >= 0.7 on token sets)
+            dup_match = self._find_near_duplicate(content, entries)
+            if dup_match is not None:
+                return {
+                    "success": False,
+                    "error": (
+                        f"This entry is very similar to an existing one "
+                        f"(Jaccard >= 0.7). Use 'replace' to update it instead "
+                        f"of adding a duplicate."
+                    ),
+                    "similar_entry": dup_match,
+                }
+
             # Calculate what the new total would be
             new_entries = entries + [content]
             new_total = len(ENTRY_DELIMITER.join(new_entries))
@@ -466,6 +556,7 @@ class MemoryStore:
 
             entries.append(content)
             self._set_entries(target, entries)
+            self._record_provenance("add", target, content)
             self.save_to_disk(target)
 
         return self._success_response(target, "Entry added.")
@@ -538,6 +629,7 @@ class MemoryStore:
             entries[idx] = new_content
             self._set_entries(target, entries)
             self._backup_before_write(target)
+            self._record_provenance("replace", target, new_content)
             self.save_to_disk(target)
 
         return self._success_response(target, "Entry replaced.")
@@ -691,6 +783,9 @@ class MemoryStore:
             # Commit.
             self._set_entries(target, working)
             self._backup_before_write(target)
+            for op in operations:
+                if op.get("action") in ("add", "replace"):
+                    self._record_provenance(op["action"], target, op.get("content", ""))
             self.save_to_disk(target)
 
         return self._success_response(target, f"Applied {len(operations)} operation(s).")

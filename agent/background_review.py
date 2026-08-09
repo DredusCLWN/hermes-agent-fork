@@ -22,6 +22,7 @@ import copy
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from agent.thread_scoped_output import thread_scoped_silence
@@ -34,6 +35,59 @@ from agent.skill_gate import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Secret scrubbing — prevent API keys from leaking into MEMORY.md via the
+# review fork.  Tool outputs (terminal, file reads, HTTP) can contain secrets
+# that the fork would capture as "facts" and write to memory, which then
+# gets injected into every future session's system prompt.
+#
+# Patterns cover common credential formats.  The replacement is [REDACTED]
+# so the fork sees that a secret WAS there (context preserved) without
+# storing the actual value.
+_SECRET_PATTERNS = [
+    re.compile(r"sk-[A-Za-z0-9_]{16,}"),           # OpenAI / Anthropic
+    re.compile(r"sk-ant-[A-Za-z0-9_\-]{16,}"),     # Anthropic explicit
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{16,}"),     # GitHub tokens
+    re.compile(r"AIza[A-Za-z0-9_\-]{16,}"),        # Google API keys
+    re.compile(r"[Bb]earer\s+[A-Za-z0-9_\-\.]{16,}"),  # Bearer tokens
+    re.compile(r"(?:access_)?token\s*[=:]\s*[\"']?[A-Za-z0-9_\-]{16,}"),  # token=...
+    re.compile(r"xox[bpoas]-[A-Za-z0-9\-]{10,}"),  # Slack tokens
+]
+
+
+def _scrub_secrets(messages: List[Dict]) -> List[Dict]:
+    """Return a shallow copy of messages with secrets redacted from tool-role content.
+
+    Only tool-result messages are scrubbed — user and assistant text are
+    left intact (the user typed them, the model generated them).  Tool
+    outputs are where terminal commands, file reads, and HTTP responses
+    dump raw secrets that the review fork would otherwise capture.
+    """
+    scrubbed: List[Dict] = []
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "tool":
+            scrubbed.append(msg)
+            continue
+        msg = dict(msg)
+        content = msg.get("content")
+        if isinstance(content, str):
+            for pat in _SECRET_PATTERNS:
+                content = pat.sub("[REDACTED]", content)
+            msg["content"] = content
+        elif isinstance(content, list):
+            new_parts = []
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    text = part["text"]
+                    for pat in _SECRET_PATTERNS:
+                        text = pat.sub("[REDACTED]", text)
+                    part = dict(part, text=text)
+                new_parts.append(part)
+            msg["content"] = new_parts
+        scrubbed.append(msg)
+    return scrubbed
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +238,16 @@ _MEMORY_REVIEW_PROMPT = (
     "2. Has the user expressed expectations about how you should behave, their work "
     "style, or ways they want you to operate?\n\n"
     "If something stands out, save it using the memory tool. "
-    "If nothing is worth saving, just say 'Nothing to save.' and stop."
+    "If nothing is worth saving, just say 'Nothing to save.' and stop.\n\n"
+    "MEMORY HYGIENE (apply every pass):\n"
+    "  • Dedup: if a fact you're about to add is already in memory "
+    "(same meaning, different wording), use 'replace' on the existing "
+    "entry — do NOT add a duplicate.\n"
+    "  • Contradiction: if a new fact contradicts an existing entry, "
+    "use 'replace' — the old fact is wrong now.\n"
+    "  • Stale-refresh: scan entries for time-sensitive facts that "
+    "may have changed. If the conversation revealed an update, "
+    "'replace' the stale entry."
 )
 
 _SKILL_REVIEW_PROMPT = (
@@ -424,7 +487,18 @@ _COMBINED_REVIEW_PROMPT = (
     "stale one-time observations, and keep the most actionable and "
     "durable facts. The goal is a compact, high-signal memory file, "
     "not an append-only log. Preserve user preferences and identity "
-    "information — only trim stale situational notes."
+    "information — only trim stale situational notes.\n\n"
+    "MEMORY HYGIENE (apply every pass):\n"
+    "  • Dedup: if a fact you're about to add is already in memory "
+    "(same meaning, different wording), use 'replace' on the existing "
+    "entry — do NOT add a duplicate.\n"
+    "  • Contradiction: if a new fact contradicts an existing entry "
+    "(e.g. 'user uses deepseek' vs 'user switched to gemini'), use "
+    "'replace' — the old fact is wrong now.\n"
+    "  • Stale-refresh: scan entries for time-sensitive facts that "
+    "may have changed since they were written (project status, tool "
+    "choices, work priorities). If the conversation revealed an "
+    "update, 'replace' the stale entry."
 )
 
 
@@ -966,6 +1040,7 @@ def _run_review_in_thread(
                     _digest_history(messages_snapshot) if _routed
                     else messages_snapshot
                 )
+                _review_history = _scrub_secrets(_review_history)
                 review_agent.run_conversation(
                     user_message=(
                         _augmented_prompt
