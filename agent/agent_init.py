@@ -1706,6 +1706,8 @@ def init_agent(
                     memory_char_limit=mem_config.get("memory_char_limit", 4000),
                     user_char_limit=mem_config.get("user_char_limit", 2000),
                 )
+                agent._memory_store._session_id = getattr(agent, "session_id", "") or ""
+                agent._memory_store._write_origin = getattr(agent, "_memory_write_origin", "") or ""
                 agent._memory_store.load_from_disk()
         except Exception:
             pass  # Memory is optional -- don't break agent init

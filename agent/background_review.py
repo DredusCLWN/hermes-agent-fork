@@ -917,6 +917,10 @@ def _run_review_in_thread(
             review_agent._user_profile_enabled = agent._user_profile_enabled
             review_agent._memory_nudge_interval = 0
             review_agent._skill_nudge_interval = 0
+            # Sync to the shared MemoryStore so provenance records the correct origin
+            if review_agent._memory_store:
+                review_agent._memory_store._write_origin = "background_review"
+                review_agent._memory_store._session_id = getattr(agent, "session_id", "") or ""
             # PERSISTENCE ISOLATION (the curator-takeover root cause): the fork
             # shares the parent's session_id (set below, for prompt-cache
             # warmth), so without this it would write its harness turn ("Review
@@ -1070,6 +1074,10 @@ def _run_review_in_thread(
                 review_agent.close()
             except Exception:
                 pass
+            # Restore the shared MemoryStore's write_origin so foreground
+            # writes after the review are tagged correctly.
+            if agent._memory_store:
+                agent._memory_store._write_origin = getattr(agent, "_memory_write_origin", "assistant_tool")
             review_agent = None
 
         # ── Skill gate: validate and revert rejected edits ──
@@ -1157,6 +1165,9 @@ def _run_review_in_thread(
                         pass
             except Exception:
                 pass
+        # Restore write_origin on exception path too
+        if agent._memory_store:
+            agent._memory_store._write_origin = getattr(agent, "_memory_write_origin", "assistant_tool")
         # Clear the approval callback on this bg-review thread so a
         # recycled thread-id doesn't inherit a stale reference.
         try:
