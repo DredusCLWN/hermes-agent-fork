@@ -365,6 +365,30 @@ class MemoryStore:
         get_memory_dir().mkdir(parents=True, exist_ok=True)
         self._write_file(self._path_for(target), self._entries_for(target))
 
+    def _backup_before_write(self, target: str) -> None:
+        """Save a timestamped backup before destructive mutations (replace/remove/batch).
+
+        The drift .bak only fires on external-write detection.  LLM-driven
+        consolidation (replace/remove) can silently delete an entry the user
+        wanted to keep — this backup gives a recovery path.  Backups rotate:
+        only the 10 most recent per target are kept.
+        """
+        try:
+            src = self._path_for(target)
+            if not src.exists():
+                return
+            backup_dir = get_memory_dir() / "backup"
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            dst = backup_dir / f"{src.stem}_{ts}.md"
+            dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+            # Rotate: keep only 10 most recent per target
+            backups = sorted(backup_dir.glob(f"{src.stem}_*.md"))
+            for old in backups[:-10]:
+                old.unlink(missing_ok=True)
+        except Exception:
+            logger.debug("memory backup failed (non-fatal)", exc_info=True)
+
     def _entries_for(self, target: str) -> List[str]:
         if target == "user":
             return self.user_entries
@@ -513,6 +537,7 @@ class MemoryStore:
 
             entries[idx] = new_content
             self._set_entries(target, entries)
+            self._backup_before_write(target)
             self.save_to_disk(target)
 
         return self._success_response(target, "Entry replaced.")
@@ -555,6 +580,7 @@ class MemoryStore:
             idx = matches[0][0]
             entries.pop(idx)
             self._set_entries(target, entries)
+            self._backup_before_write(target)
             self.save_to_disk(target)
 
         return self._success_response(target, "Entry removed.")
@@ -664,6 +690,7 @@ class MemoryStore:
 
             # Commit.
             self._set_entries(target, working)
+            self._backup_before_write(target)
             self.save_to_disk(target)
 
         return self._success_response(target, f"Applied {len(operations)} operation(s).")
@@ -726,6 +753,16 @@ class MemoryStore:
         if message:
             resp["message"] = message
         resp["note"] = "Write saved. This update is complete — do not repeat it."
+        # Proactive consolidation hint at 85%+ — gives the model a chance to
+        # merge/trim stale entries before the next add hits the hard limit and
+        # forces a multi-turn consolidate-then-retry dance.
+        if pct >= 85:
+            resp["consolidation_hint"] = (
+                f"Memory is at {pct}% capacity. Consider proactively merging "
+                f"overlapping entries or removing stale ones with "
+                f"memory(action='replace'/'remove') or memory(action='batch') "
+                f"to free space for future writes."
+            )
         return resp
 
     def _render_block(self, target: str, entries: List[str]) -> str:
@@ -889,8 +926,8 @@ def load_on_disk_store() -> "MemoryStore":
     Falls back to the built-in defaults if config can't be loaded, so this can
     never raise on a missing/unreadable config.
     """
-    memory_char_limit = 2200
-    user_char_limit = 1375
+    memory_char_limit = 4000
+    user_char_limit = 2000
     try:
         from hermes_cli.config import load_config
 

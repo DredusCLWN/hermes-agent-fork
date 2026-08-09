@@ -3302,6 +3302,31 @@ class AIAgent:
                 self._pending_steer = cleaned
         return True
 
+    def inject_user_turn(self, text: str) -> bool:
+        """Inject a user-level message for the next idle turn.
+
+        Used by the live session registry's agent_message delivery: when an
+        idle agent receives a message from another session, this queues it
+        via the process_registry completion_queue so the host (CLI/gateway)
+        picks it up as a new turn when the agent is next idle.
+
+        Returns True if the message was queued, False if text was empty.
+        """
+        if not text or not text.strip():
+            return False
+        try:
+            from tools.process_registry import process_registry
+            evt = {
+                "type": "agent_message",
+                "text": text.strip(),
+                "session_id": getattr(self, "session_id", None),
+            }
+            process_registry.completion_queue.put(evt)
+            return True
+        except Exception:
+            logger.debug("inject_user_turn failed", exc_info=True)
+            return False
+
     def redirect(self, text: str) -> bool:
         """Redirect the active turn without converting it into a new task.
 
@@ -4287,12 +4312,12 @@ class AIAgent:
         # Strip code blocks and markdown headers — they pollute keyword freq
         cleaned = re.sub(r"```[\s\S]*?```", " ", response_text)
         cleaned = re.sub(r"#{1,6}\s", " ", cleaned)
-        # Extract word tokens (2+ chars, alphanumeric)
-        tokens = re.findall(r"[A-Za-z][A-Za-z0-9_]{1,}", cleaned)
+        # Extract word tokens (2+ chars, Unicode-aware — covers Cyrillic, CJK, etc.)
+        tokens = re.findall(r"\w{2,}", cleaned, re.UNICODE)
         if not tokens:
             return ""
         # Count frequency, excluding stopwords and user_text tokens
-        user_tokens = set(t.lower() for t in re.findall(r"[A-Za-z][A-Za-z0-9_]{1,}", user_text))
+        user_tokens = set(t.lower() for t in re.findall(r"\w{2,}", user_text, re.UNICODE))
         freq: dict[str, int] = {}
         for token in tokens:
             lower = token.lower()
