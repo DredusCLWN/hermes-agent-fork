@@ -1892,16 +1892,20 @@ def _(rid, params: dict) -> dict:
     project = _project_info_for_cwd(_display_session_cwd(session))
 
     # ── Gather metrics ──
-    in_tok = int(usage.get("input") or 0)
-    out_tok = int(usage.get("output") or 0)
+    # Prefer live agent in-memory counters; fall back to persisted DB values
+    # when agent is None or freshly restarted (tokens reset to 0 in memory).
+    in_tok = int(usage.get("input") or 0) or int(meta.get("input_tokens", 0) or 0)
+    out_tok = int(usage.get("output") or 0) or int(meta.get("output_tokens", 0) or 0)
     cache_read = int(getattr(agent, "session_cache_read_tokens", 0) or 0) if agent else 0
-    cache_write = int(usage.get("cache_write") or 0)
-    reasoning_tok = int(usage.get("reasoning") or 0)
-    prompt_tok = int(usage.get("prompt") or 0)
-    completion_tok = int(usage.get("completion") or 0)
-    api_calls = int(usage.get("calls") or 0)
+    if not cache_read:
+        cache_read = int(meta.get("cache_read_tokens", 0) or 0)
+    cache_write = int(usage.get("cache_write") or 0) or int(meta.get("cache_write_tokens", 0) or 0)
+    reasoning_tok = int(usage.get("reasoning") or 0) or int(meta.get("reasoning_tokens", 0) or 0)
+    prompt_tok = int(usage.get("prompt") or 0) or in_tok
+    completion_tok = int(usage.get("completion") or 0) or out_tok
+    api_calls = int(usage.get("calls") or 0) or int(meta.get("api_call_count", 0) or 0)
     total_tok = in_tok + out_tok
-    est_cost = float(usage.get("cost_usd") or 0)
+    est_cost = float(usage.get("cost_usd") or 0) or float(meta.get("estimated_cost_usd", 0) or 0)
 
     compressor = getattr(agent, "context_compressor", None) if agent else None
     compressions = 0
