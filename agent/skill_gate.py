@@ -55,6 +55,9 @@ _DEDUP_THRESHOLD = 0.80
 # How many rejected edits to keep per skill.
 _MAX_REJECTED_PER_SKILL = 5
 
+# Rejected-edit buffer entries older than this (seconds) are pruned on save.
+_BUFFER_MAX_AGE_SECONDS = 30 * 24 * 3600  # 30 days
+
 # Rejected-edit buffer file path (lazy-computed).
 _BUFFER_PATH: Optional[Path] = None
 
@@ -183,22 +186,70 @@ def validate_skill_edits(
     """
     results: List[Dict[str, Any]] = []
 
-    # Check deleted skills (in before, missing from after) — restore them
-    for name, info in before.items():
-        if name not in after:
-            results.append({
-                "skill": name,
-                "action": "revert",
-                "reason": "deleted_by_review",
-                "path": str(info["path"]),
-                "old_content": info["content"],
-            })
+    # Build path → name index for rename detection.
+    # If review renames a skill (delete old + create new at same path),
+    # we detect it by matching paths, not names.
+    before_paths: Dict[str, str] = {
+        str(info["path"]): name for name, info in before.items()
+    }
+    after_paths: Dict[str, str] = {
+        str(info["path"]): name for name, info in after.items()
+    }
 
-    # Check new skills (in after but not before)
+    # Check deleted skills (in before, missing from after by name AND path).
+    # If the path still exists in after under a different name, it's a rename —
+    # handled below as a modified skill, not a deletion.
+    for name, info in before.items():
+        if name in after:
+            continue  # still exists by name
+        skill_path = str(info["path"])
+        if skill_path in after_paths:
+            continue  # path exists under new name → rename, not delete
+        results.append({
+            "skill": name,
+            "action": "revert",
+            "reason": "deleted_by_review",
+            "path": skill_path,
+            "old_content": info["content"],
+        })
+
+    # Check new skills (in after but not before by name).
+    # If the path existed in before under a different name, it's a rename —
+    # treat as a modified skill (compare old content at that path vs new).
     for name, info in after.items():
         if name in before:
             continue
-        # New skill created by review
+        skill_path = str(info["path"])
+        old_name = before_paths.get(skill_path)
+        if old_name and old_name in before:
+            # Rename: compare old content (at same path) vs new content
+            old_info = before[old_name]
+            old_content = old_info["content"]
+            new_content = info["content"]
+            if old_content == new_content:
+                continue  # only name changed, content same — allow
+            old_tokens = old_info["tokens"]
+            new_tokens = info["tokens"]
+            delta = new_tokens - old_tokens
+            if delta > _MAX_SKILL_EDIT_TOKENS:
+                results.append({
+                    "skill": name,
+                    "action": "revert",
+                    "reason": f"lr_budget_exceeded:rename:delta={delta}t>budget={_MAX_SKILL_EDIT_TOKENS}t",
+                    "path": skill_path,
+                    "old_content": old_content,
+                    "new_content": new_content,
+                    "delta_tokens": delta,
+                })
+                continue
+            results.append({
+                "skill": name,
+                "action": "keep",
+                "reason": f"rename_ok:from={old_name}",
+                "delta_tokens": delta,
+            })
+            continue
+        # Genuinely new skill (no path match)
         content = info["content"]
         tokens = info["tokens"]
 
@@ -329,12 +380,23 @@ def _load_buffer() -> Dict[str, List[Dict[str, Any]]]:
 
 
 def _save_buffer(buffer: Dict[str, List[Dict[str, Any]]]) -> None:
-    """Save the rejected-edit buffer to disk."""
+    """Save the rejected-edit buffer to disk.
+
+    Prunes entries older than ``_BUFFER_MAX_AGE_SECONDS`` to prevent
+    unbounded growth.
+    """
     path = _buffer_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        cutoff = now - _BUFFER_MAX_AGE_SECONDS
+        pruned: Dict[str, List[Dict[str, Any]]] = {}
+        for skill_name, entries in buffer.items():
+            fresh = [e for e in entries if e.get("timestamp", 0) >= cutoff]
+            if fresh:
+                pruned[skill_name] = fresh[-_MAX_REJECTED_PER_SKILL:]
         path.write_text(
-            json.dumps(buffer, indent=2, ensure_ascii=False),
+            json.dumps(pruned, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
     except Exception as exc:
