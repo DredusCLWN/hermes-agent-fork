@@ -1088,6 +1088,72 @@ Full user-facing docs: `website/docs/user-guide/features/curator.md`.
 
 ---
 
+## Skill Gate (validation + held-out evaluation)
+
+Quality-control layer for background review skill edits, inspired by
+Microsoft's SkillOpt framework. Lives in `agent/skill_gate.py` and is
+integrated into `agent/background_review.py`'s `_run_review_in_thread`.
+
+**Pipeline:** snapshot before review → augment prompt with budget +
+mining context → review agent runs → `run_skill_gate(before, agent)` →
+
+### Layer 1 — Learning-rate budget
+- Max **500 tokens** (~2000 chars) added per skill per review pass.
+- Target skill size: 300–2000 tokens. Skills already over the target
+  are NOT trimmed — only edits that *push* a skill over the cap are
+  rejected.
+- Budget instruction is injected into the review prompt.
+
+### Layer 2 — Dedup / similarity gate
+- Jaccard word-overlap (words ≥3 chars) between new skill and all
+  existing skills. Threshold: **0.80** → reject + delete.
+
+### Layer 3 — Rejected-edit buffer
+- `~/.hermes/skill_rejected_edits.json` — stores up to 5 rejected
+  edits per skill with reason, timestamp, content preview.
+- Auto-prunes entries older than **30 days** on save.
+
+### Layer 4 — Held-out validation gate
+- Extracts **2 test cases** from past sessions in `state.db`
+  (sessions ≠ current, last 7 days, 30–500 chars).
+- Test cases are **keyword-filtered** per skill: keywords extracted
+  from skill name + first line of content. No relevant cases →
+  fail-open (keep).
+- Stop-words filter out greetings/thanks/commands.
+- Each test case: auxiliary LLM call evaluates old vs new skill
+  content (1–10 score, `max_tokens=10`, `temp=0`).
+- Revert only if `new_avg < old_avg - 1.0` (noise threshold).
+- **Fail-open:** API error / parse failure → keep the edit.
+- **Throttled:** max once per 10 minutes (`_HELD_OUT_THROTTLE_SECONDS`).
+
+### Protected skills
+- Only curator-managed skills (`created_by: "agent"`) are gated.
+- Bundled, hub-installed, external, pinned, user-owned skills are
+  excluded via `is_curator_managed()` from `tools/skill_usage.py`.
+
+### Deletion + rename detection
+- Skills in `before` but missing from `after` (by name AND path) →
+  auto-restored from snapshot.
+- Path-based matching detects renames: if a path exists in both
+  before/after under different names, it's treated as a modified
+  skill, not delete+create.
+- `revert_skill()` creates parent directories if the skill directory
+  was deleted by the review agent.
+
+### Recurring task mining
+- `mine_recurring_tasks()` scans `state.db` for repeated user message
+  patterns across sessions (lookback 168h, min 3 repeats).
+- Results are injected into the review prompt as additional context.
+
+### User-visible output
+```
+💾 Self-improvement review: Skill 'git-workflow' patched
+🚫 Skill gate rejected:
+  • git-workflow: held_out_degraded:old=8.0>new=5.5 (old 8.0 → new 5.5)
+```
+
+---
+
 ## Cron (scheduled jobs)
 
 `cron/jobs.py` (job store) + `cron/scheduler.py` (tick loop). Agents
