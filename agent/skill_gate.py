@@ -470,17 +470,53 @@ _MAX_TEST_CASE_CHARS = 500
 # Timeout for the evaluation LLM call.
 _EVAL_TIMEOUT = 30.0
 
+# Degradation threshold: revert only if new_avg < old_avg - threshold.
+# Below 1.0 is noise (temp=0 still has sampling variance on ±1 score).
+_DEGRADATION_THRESHOLD = 1.0
+
+# Throttle: minimum seconds between held-out validation runs.
+# Prevents +30-60s latency on every turn during rapid conversations.
+_HELD_OUT_THROTTLE_SECONDS = 600  # 10 minutes
+
+# Stop-words: user messages starting with these are not real tasks.
+_STOP_WORD_PREFIXES = (
+    "спасибо", "благодар", "thank", "thanks", "ок", "окей", "ok",
+    "продолж", "contin", "давай", "хорошо", "good", "great",
+    "да", "нет", "yes", "no", "ага", "угу", "хм", "hm",
+    "/", "!", "?",  # commands, exclamations, questions
+)
+
+# Last held-out run timestamp (module-level throttle state).
+_last_held_out_ts: float = 0.0
+
+
+def _is_stop_word_msg(content: str) -> bool:
+    """Check if a user message is a greeting/thanks/command — not a real task."""
+    lower = content.strip().lower()
+    if len(lower) < _MIN_TEST_CASE_CHARS:
+        return True
+    for prefix in _STOP_WORD_PREFIXES:
+        if lower.startswith(prefix):
+            return True
+    return False
+
 
 def extract_test_cases(
     session_db: Any,
     current_session_id: str,
     n: int = _HELD_OUT_TEST_COUNT,
+    skill_keywords: Optional[List[str]] = None,
 ) -> List[str]:
     """Extract held-out test cases from past sessions in state.db.
 
     Picks representative user messages from sessions OTHER than the
     current one — these are "held-out" because the review agent never
     saw them during the current turn.
+
+    If ``skill_keywords`` is provided, filters candidates to messages
+    containing at least one keyword (case-insensitive). This ensures
+    test cases are relevant to the skill being evaluated — evaluating
+    a git-workflow skill on "make me a landing page" is noise.
 
     Returns a list of user message strings (truncated to _MAX_TEST_CASE_CHARS).
     """
@@ -506,7 +542,7 @@ def extract_test_cases(
             msgs = session_db._execute_read_all(
                 "SELECT content FROM messages "
                 "WHERE session_id = ? AND role = 'user' AND active = 1 "
-                "ORDER BY id LIMIT 3",
+                "ORDER BY id LIMIT 5",
                 (sid,),
             )
             if not msgs:
@@ -516,8 +552,14 @@ def extract_test_cases(
                 if not isinstance(content, str):
                     continue
                 content = content.strip()
-                if len(content) >= _MIN_TEST_CASE_CHARS:
-                    candidates.append(content[:_MAX_TEST_CASE_CHARS])
+                if _is_stop_word_msg(content):
+                    continue
+                # Keyword filter: if keywords provided, require at least one match
+                if skill_keywords:
+                    lower = content.lower()
+                    if not any(kw.lower() in lower for kw in skill_keywords):
+                        continue
+                candidates.append(content[:_MAX_TEST_CASE_CHARS])
 
         if not candidates:
             return []
@@ -586,24 +628,52 @@ def _evaluate_skill_on_task(
         return None
 
 
+def _extract_skill_keywords(skill_name: str, skill_content: str) -> List[str]:
+    """Extract keywords from skill name and content for test-case filtering.
+
+    Uses the skill name (split on hyphens/underscores) plus the first
+    line of the skill content (usually a title/description).
+    """
+    keywords: List[str] = []
+    # Split skill name: "git-workflow" → ["git", "workflow"]
+    for part in re.split(r"[-_\s]+", skill_name.lower()):
+        if len(part) >= 3:
+            keywords.append(part)
+    # First non-empty line of content often has the skill's domain
+    for line in skill_content.split("\n"):
+        line = line.strip().strip("#*").strip()
+        if len(line) >= 5:
+            for word in re.findall(r"\b\w{3,}\b", line.lower()):
+                if word not in keywords:
+                    keywords.append(word)
+            break  # only first meaningful line
+    return keywords[:10]  # cap to avoid over-filtering
+
+
 def validate_with_held_out(
     before: Dict[str, Dict[str, Any]],
     after: Dict[str, Dict[str, Any]],
     test_cases: List[str],
     main_runtime: Optional[Dict[str, Any]] = None,
+    session_db: Any = None,
+    current_session_id: str = "",
 ) -> List[Dict[str, Any]]:
     """Run held-out validation on modified skills.
 
     For each skill that was modified (not new, not deleted), evaluates
-    old vs new content on the test cases. Returns a list of results:
+    old vs new content on test cases relevant to that skill. Returns a
+    list of results:
     ``{"skill": name, "action": "revert"|"keep", "reason": str, scores}``
 
-    Only runs if there are test cases AND modified skills. If evaluation
-    fails (API error, parse error), the edit is kept (fail-open, not
-    fail-closed — we don't want a transient API issue to block all
-    skill improvements).
+    Test cases are filtered by keywords extracted from the skill name/content.
+    If no relevant test cases are found for a skill, the edit is kept
+    (fail-open — no signal → don't block).
+
+    If evaluation fails (API error, parse error), the edit is kept (fail-open).
+    Revert only triggers if ``new_avg < old_avg - _DEGRADATION_THRESHOLD``
+    (default 1.0) — below the noise floor of ±1 score variance.
     """
-    if not test_cases:
+    if not test_cases and not (session_db and current_session_id):
         return []
 
     # Find modified skills that passed the static gate
@@ -625,10 +695,36 @@ def validate_with_held_out(
         old_content = old_info["content"]
         new_content = new_info["content"]
 
+        # Extract skill-specific test cases if we have DB access
+        skill_test_cases = test_cases
+        if session_db and current_session_id:
+            keywords = _extract_skill_keywords(name, old_content)
+            if keywords:
+                skill_test_cases = extract_test_cases(
+                    session_db, current_session_id,
+                    skill_keywords=keywords,
+                )
+                if not skill_test_cases:
+                    # No relevant test cases → fail-open (keep)
+                    results.append({
+                        "skill": name,
+                        "action": "keep",
+                        "reason": "held_out_no_relevant_cases:fail_open",
+                    })
+                    continue
+
+        if not skill_test_cases:
+            results.append({
+                "skill": name,
+                "action": "keep",
+                "reason": "held_out_no_cases:fail_open",
+            })
+            continue
+
         old_scores: List[Optional[int]] = []
         new_scores: List[Optional[int]] = []
 
-        for task in test_cases:
+        for task in skill_test_cases:
             old_score = _evaluate_skill_on_task(name, old_content, task, main_runtime)
             new_score = _evaluate_skill_on_task(name, new_content, task, main_runtime)
             old_scores.append(old_score)
@@ -652,13 +748,15 @@ def validate_with_held_out(
         old_avg = sum(old_valid) / len(old_valid) if old_valid else 0
         new_avg = sum(new_valid) / len(new_valid)
 
-        # Accept if new >= old (equal is OK — the static gate already
-        # validated size/dedup/budget, held-out just adds quality signal)
-        if new_avg >= old_avg:
+        # Revert only if degradation exceeds threshold (noise floor ±1)
+        if new_avg < old_avg - _DEGRADATION_THRESHOLD:
             results.append({
                 "skill": name,
-                "action": "keep",
-                "reason": f"held_out_ok:old={old_avg:.1f}>=new={new_avg:.1f}",
+                "action": "revert",
+                "reason": f"held_out_degraded:old={old_avg:.1f}>new={new_avg:.1f}",
+                "path": str(new_info["path"]),
+                "old_content": old_content,
+                "new_content": new_content,
                 "old_scores": old_scores,
                 "new_scores": new_scores,
                 "old_avg": old_avg,
@@ -667,11 +765,8 @@ def validate_with_held_out(
         else:
             results.append({
                 "skill": name,
-                "action": "revert",
-                "reason": f"held_out_degraded:old={old_avg:.1f}>new={new_avg:.1f}",
-                "path": str(new_info["path"]),
-                "old_content": old_content,
-                "new_content": new_content,
+                "action": "keep",
+                "reason": f"held_out_ok:old={old_avg:.1f}>=new={new_avg:.1f}-{_DEGRADATION_THRESHOLD}",
                 "old_scores": old_scores,
                 "new_scores": new_scores,
                 "old_avg": old_avg,
@@ -719,15 +814,27 @@ def run_skill_gate(
     if any(r["action"] == "revert" for r in results):
         after = snapshot_skills()
 
-    # Phase 2: held-out validation gate (only if agent provided)
+    # Phase 2: held-out validation gate (only if agent provided + not throttled)
     if agent is not None:
         session_db = getattr(agent, "_session_db", None)
         session_id = getattr(agent, "session_id", "")
         if session_db and session_id:
-            test_cases = extract_test_cases(session_db, session_id)
-            if test_cases:
+            # Throttle: skip held-out if last run was < _HELD_OUT_THROTTLE_SECONDS ago
+            global _last_held_out_ts
+            now = time.time()
+            if now - _last_held_out_ts < _HELD_OUT_THROTTLE_SECONDS:
+                logger.debug(
+                    "skill_gate: held-out validation throttled (%.0fs since last run)",
+                    now - _last_held_out_ts,
+                )
+            else:
+                _last_held_out_ts = now
                 main_runtime = agent._current_main_runtime() if hasattr(agent, "_current_main_runtime") else None
-                held_out_results = validate_with_held_out(before, after, test_cases, main_runtime)
+                held_out_results = validate_with_held_out(
+                    before, after, [], main_runtime,
+                    session_db=session_db,
+                    current_session_id=session_id,
+                )
 
                 for r in held_out_results:
                     results.append(r)
