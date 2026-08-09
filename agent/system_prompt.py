@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from agent.prompt_builder import (
@@ -617,6 +618,33 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     }
 
 
+_VOLATILE_PATTERNS = [
+    (re.compile(r"\b\d{10}\b"), "unix timestamp"),
+    (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I), "UUID"),
+    (re.compile(r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"), "ISO datetime"),
+    (re.compile(r"\b0\.\d{6,}\b"), "random float"),
+]
+
+
+def _warn_volatile_in_stable(stable: str, context: str) -> None:
+    """Warn if stable/context prompt tiers contain volatile patterns.
+
+    Stable and context tiers are expected to be byte-identical across
+    rebuilds (compression/restore).  Volatile content there busts the
+    prefix cache on every rebuild.  This is warn-only — it never
+    modifies the prompt.
+    """
+    for label, text in (("stable", stable), ("context", context)):
+        for pat, name in _VOLATILE_PATTERNS:
+            m = pat.search(text)
+            if m:
+                logger.warning(
+                    "CacheAligner: %s tier contains %s (%r) — "
+                    "this will bust prefix cache on rebuilds",
+                    label, name, m.group()[:40],
+                )
+
+
 def build_system_prompt(agent: Any, system_message: Optional[str] = None) -> str:
     """Assemble the full system prompt from all layers.
 
@@ -637,6 +665,8 @@ def build_system_prompt(agent: Any, system_message: Optional[str] = None) -> str
     parts = build_system_prompt_parts(agent, system_message=system_message)
     joined = "\n\n".join(p for p in (parts["stable"], parts["context"], parts["volatile"]) if p)
     agent._cached_system_prompt_static = parts["stable"]
+
+    _warn_volatile_in_stable(parts["stable"], parts["context"])
 
     # Surface context-file truncation warnings through the normal agent status
     # channel so gateway/CLI users see them in chat instead of only in logs.

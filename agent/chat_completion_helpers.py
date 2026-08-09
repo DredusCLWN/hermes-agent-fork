@@ -16,6 +16,7 @@ sites unchanged.  Symbols that tests patch on ``run_agent`` (e.g.
 from __future__ import annotations
 
 import contextvars
+import copy
 import json
 import logging
 import math
@@ -57,6 +58,55 @@ _OPENROUTER_PROVIDER_SORT_VALUES = {"throughput", "latency", "price"}
 # billing reasons keep their own 60s cooldown (set above); this is the
 # narrower non-rate-limit case.  See issue #24996.
 _FALLBACK_EXHAUSTED_COOLDOWN_S = 5.0
+
+
+def _maybe_dial_down_reasoning(agent, messages, base_config):
+    """Lower reasoning effort on routine tool-result continuation turns.
+
+    When the last message is a tool result (not an error) and the one
+    before it is an assistant message with tool calls, this is a routine
+    continuation — the model read a file / ran a command and is resuming.
+    Dialing down reasoning effort saves output tokens on these turns.
+    New user questions and error results keep full effort.
+
+    Returns the (possibly modified) reasoning_config dict.
+    """
+    if not isinstance(base_config, dict) or not messages:
+        return base_config
+    if len(messages) < 2:
+        return base_config
+    last = messages[-1]
+    prev = messages[-2]
+    if not isinstance(last, dict) or last.get("role") != "tool":
+        return base_config
+    if not isinstance(prev, dict) or prev.get("role") != "assistant":
+        return base_config
+    if not prev.get("tool_calls"):
+        return base_config
+    # Check the tool result for error signals
+    content = last.get("content", "")
+    if isinstance(content, list):
+        content = " ".join(
+            p.get("text", "") for p in content
+            if isinstance(p, dict) and isinstance(p.get("text"), str)
+        )
+    if not isinstance(content, str):
+        content = str(content)
+    # Error indicators in tool output — keep full effort
+    content_lower = content.lower()
+    if any(sig in content_lower for sig in (
+        "error", "traceback", "exception", "failed", "fatal",
+        "syntaxerror", "typeerror", "keyerror", "indexerror",
+        "command not found", "no such file", "permission denied",
+    )):
+        return base_config
+    # Routine continuation — dial down
+    effort = str(base_config.get("effort", "medium") or "medium").strip().lower()
+    if effort in ("high", "xhigh", "max", "ultra", "medium"):
+        modified = dict(base_config)
+        modified["effort"] = "low"
+        return modified
+    return base_config
 
 
 def _context_thread_target(callback):
@@ -1345,8 +1395,7 @@ def build_api_kwargs(agent, api_messages: list, tools_for_api: list | None = Non
             messages=anthropic_messages,
             tools=tools_for_api,
             max_tokens=ephemeral_out if ephemeral_out is not None else agent.max_tokens,
-            reasoning_config=agent.reasoning_config,
-            is_oauth=agent._is_anthropic_oauth,
+            reasoning_config=_maybe_dial_down_reasoning(agent, anthropic_messages, agent.reasoning_config),
             preserve_dots=agent._anthropic_preserve_dots(),
             context_length=ctx_len,
             base_url=getattr(agent, "_anthropic_base_url", None),
@@ -1427,16 +1476,7 @@ def build_api_kwargs(agent, api_messages: list, tools_for_api: list | None = Non
             model=agent.model,
             messages=_msgs_for_codex,
             tools=tools_for_api,
-            reasoning_config=agent.reasoning_config,
-            session_id=getattr(agent, "session_id", None),
-            base_url=agent.base_url,
-            max_tokens=agent.max_tokens,
-            timeout=agent._resolved_api_call_timeout(),
-            request_overrides=agent.request_overrides,
-            provider=getattr(agent, "provider", None),
-            is_github_responses=is_github_responses,
-            is_codex_backend=is_codex_backend,
-            is_xai_responses=is_xai_responses,
+            reasoning_config=_maybe_dial_down_reasoning(agent, _msgs_for_codex, agent.reasoning_config),
             github_reasoning_extra=agent._github_models_reasoning_extra_body() if is_github_responses else None,
             replay_encrypted_reasoning=bool(
                 getattr(agent, "_codex_reasoning_replay_enabled", True)
@@ -1534,7 +1574,7 @@ def build_api_kwargs(agent, api_messages: list, tools_for_api: list | None = Non
             max_tokens=agent.max_tokens,
             ephemeral_max_output_tokens=_ephemeral_out,
             max_tokens_param_fn=agent._max_tokens_param,
-            reasoning_config=agent.reasoning_config,
+            reasoning_config=_maybe_dial_down_reasoning(agent, api_messages, agent.reasoning_config),
             request_overrides=agent.request_overrides,
             session_id=getattr(agent, "session_id", None),
             provider_profile=_profile,

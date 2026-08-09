@@ -247,7 +247,10 @@ _MEMORY_REVIEW_PROMPT = (
     "use 'replace' — the old fact is wrong now.\n"
     "  • Stale-refresh: scan entries for time-sensitive facts that "
     "may have changed. If the conversation revealed an update, "
-    "'replace' the stale entry."
+    "'replace' the stale entry.\n\n"
+    "FAILURE MINING: If the conversation had an error, crash, or wrong "
+    "approach that was eventually resolved, capture the pitfall: what "
+    "went wrong, what the fix was, and how to avoid it next time."
 )
 
 _SKILL_REVIEW_PROMPT = (
@@ -498,7 +501,12 @@ _COMBINED_REVIEW_PROMPT = (
     "  • Stale-refresh: scan entries for time-sensitive facts that "
     "may have changed since they were written (project status, tool "
     "choices, work priorities). If the conversation revealed an "
-    "update, 'replace' the stale entry."
+    "update, 'replace' the stale entry.\n\n"
+    "FAILURE MINING: If the conversation had an error, crash, or wrong "
+    "approach that was eventually resolved, capture the pitfall: what "
+    "went wrong, what the fix was, and how to avoid it next time. This "
+    "is more valuable than capturing successes — a future session that "
+    "hits the same trap saves the entire debugging detour."
 )
 
 
