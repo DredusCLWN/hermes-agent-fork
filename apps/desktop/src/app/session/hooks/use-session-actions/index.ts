@@ -5,7 +5,7 @@ import type { NavigateFunction } from 'react-router'
 import { revealTreePane } from '@/components/pane-shell/tree/store'
 import { deleteSession, getAllSessionMessages, getLatestSessionMessages, setSessionArchived } from '@/hermes'
 import { useI18n } from '@/i18n'
-import { type ChatMessage, preserveLocalAssistantErrors, toChatMessages } from '@/lib/chat-messages'
+import { type ChatMessage, chatMessageText, preserveLocalAssistantErrors, toChatMessages } from '@/lib/chat-messages'
 import { isMissingRpcMethod } from '@/lib/gateway-rpc'
 import { recoverInFlightTurnJournal } from '@/lib/inflight-turn-journal'
 import { setSessionYolo } from '@/lib/yolo-session'
@@ -477,7 +477,16 @@ export function useSessionActions({
   )
 
   const transferToNewSession = useCallback(async (): Promise<string | null> => {
-    return createBackendSessionForSend(null, null)
+    const currentMessages = $messages.get()
+    const currentStoredId = selectedStoredSessionIdRef.current
+    const seed = currentMessages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role, content: chatMessageText(m) }))
+    const preview = seed.find(s => s.content.trim())?.content ?? null
+    return createBackendSessionForSend(preview, {
+      seed,
+      parentSessionId: currentStoredId
+    })
   }, [createBackendSessionForSend])
 
   const selectSidebarItem = useCallback(
