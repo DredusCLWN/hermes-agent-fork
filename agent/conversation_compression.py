@@ -3524,11 +3524,24 @@ def compress_context(
         )
         agent.context_compressor.last_compression_rough_tokens = _compressed_est
         # Accumulate cumulative compression savings (pre - post rough estimate).
-        # Uses threshold_tokens as pre-compression proxy (compression triggers
-        # when prompt reaches threshold) and _compressed_est as post.
-        _pre_est = getattr(agent.context_compressor, "threshold_tokens", 0) or 0
+        # Use the actual pre-compression message list, not threshold_tokens
+        # (which is the trigger threshold, not the real size at compression time).
+        _pre_est = 0
+        if messages_before_compression is not None:
+            _pre_est = estimate_request_tokens_rough(
+                messages_before_compression,
+                system_prompt=new_system_prompt or "",
+                tools=agent.tools or None,
+            )
         if _pre_est and _compressed_est < _pre_est:
-            agent.context_compressor._compression_tokens_saved_total += (_pre_est - _compressed_est)
+            _gross_saved = _pre_est - _compressed_est
+            agent.context_compressor._compression_tokens_saved_total += _gross_saved
+            # Estimate LLM cost of the summary call: prompt = full
+            # pre-compression conversation (summarizer sees all messages),
+            # completion ≈ 10% of pre (summary text is much smaller than
+            # the original middle turns it replaces).
+            _llm_cost = _pre_est + _pre_est // 10
+            agent.context_compressor._compression_llm_cost_total += _llm_cost
         agent.context_compressor.last_prompt_tokens = -1
         agent.context_compressor.last_completion_tokens = 0
         agent.context_compressor.awaiting_real_usage_after_compression = True
