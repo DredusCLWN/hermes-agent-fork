@@ -79,15 +79,29 @@ def _get_curator_skills_dir() -> Path:
     return _skills_dir()
 
 
+def _is_protected_skill(skill_md_path: Path) -> bool:
+    """Check if a skill is protected (not curator-managed).
+
+    Protected = bundled, hub-installed, external, pinned, or user-owned.
+    Only curator-managed skills (created_by: agent) are eligible for gate.
+    """
+    name = skill_md_path.parent.name
+    try:
+        from tools.skill_usage import is_curator_managed
+        return not is_curator_managed(name)
+    except Exception:
+        return False
+
+
 def _list_curator_skills() -> List[Path]:
-    """List all SKILL.md paths under the curator-managed skills dir."""
+    """List all curator-managed SKILL.md paths."""
     skills_dir = _get_curator_skills_dir()
     if not skills_dir.exists():
         return []
     result = []
     for skill_md in skills_dir.rglob("SKILL.md"):
-        # Skip bundled/hub/external skills — only curator-managed ones.
-        # The curator skills dir is ~/.hermes/skills/ which is all curator-managed.
+        if _is_protected_skill(skill_md):
+            continue
         result.append(skill_md)
     return result
 
@@ -162,6 +176,17 @@ def validate_skill_edits(
     """
     results: List[Dict[str, Any]] = []
 
+    # Check deleted skills (in before, missing from after) — restore them
+    for name, info in before.items():
+        if name not in after:
+            results.append({
+                "skill": name,
+                "action": "revert",
+                "reason": "deleted_by_review",
+                "path": str(info["path"]),
+                "old_content": info["content"],
+            })
+
     # Check new skills (in after but not before)
     for name, info in after.items():
         if name in before:
@@ -227,8 +252,10 @@ def validate_skill_edits(
             })
             continue
 
-        # Absolute size cap
-        if new_tokens > _MAX_SKILL_SIZE_TOKENS:
+        # Absolute size cap — only reject if the edit pushed the skill
+        # OVER the cap. If it was already over before (e.g. large design
+        # skill), allow small targeted edits as long as they don't grow it.
+        if new_tokens > _MAX_SKILL_SIZE_TOKENS and old_tokens <= _MAX_SKILL_SIZE_TOKENS:
             results.append({
                 "skill": name,
                 "action": "revert",
@@ -519,7 +546,9 @@ def build_budget_instruction() -> str:
         f"(~{_MAX_SKILL_EDIT_CHARS} chars) to any single skill file in this pass. "
         f"If a skill needs more changes, spread them across multiple review passes. "
         f"Target skill size: 300-{_MAX_SKILL_SIZE_TOKENS} tokens. "
-        f"If a skill is already near {_MAX_SKILL_SIZE_TOKENS} tokens, TRIM it — do not add more."
+        f"Do NOT trim or restructure skills that are already larger than this target — "
+        f"they may be intentionally large (design systems, reference banks). "
+        f"Only apply small, targeted additions or fixes to them."
     )
 
 
