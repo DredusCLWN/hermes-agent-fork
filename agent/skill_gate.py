@@ -1,0 +1,534 @@
+"""Skill validation gate — lightweight quality control for background review.
+
+Inspired by SkillOpt (Microsoft): validation gate, learning-rate budget,
+and rejected-edit buffer for skill edits made by background_review.
+
+Three layers of defense against skill bloat and garbage:
+
+1. **Learning-rate budget** — limit how much a single review pass can
+   change a skill file.  If the delta exceeds ``_MAX_SKILL_EDIT_TOKENS``,
+   the edit is rejected and reverted.
+
+2. **Dedup / similarity gate** — if a skill's content is >80% similar
+   to another existing skill (word-overlap Jaccard), reject it.
+
+3. **Rejected-edit buffer** — rejected edits are stored in a JSON file
+   so future review passes can check if a similar edit was already
+   rejected and skip it, or re-evaluate if enough context has changed.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+logger = logging.getLogger(__name__)
+
+# ── Constants ──────────────────────────────────────────────────────────────
+
+# Maximum tokens a single review pass may add to a skill file.
+# ~4 chars/token → 500 tokens ≈ 2000 chars.  Enough for a new section
+# or pitfall, not enough to double a compact skill.
+_MAX_SKILL_EDIT_TOKENS = 500
+_MAX_SKILL_EDIT_CHARS = _MAX_SKILL_EDIT_TOKENS * 4
+
+# Maximum total size of a SKILL.md in tokens.  Skills above this are
+# flagged as bloated and the review is told to trim, not add.
+_MAX_SKILL_SIZE_TOKENS = 2000
+_MAX_SKILL_SIZE_CHARS = _MAX_SKILL_SIZE_TOKENS * 4
+
+# Jaccard similarity threshold for dedup.  Above this → reject as duplicate.
+_DEDUP_THRESHOLD = 0.80
+
+# How many rejected edits to keep per skill.
+_MAX_REJECTED_PER_SKILL = 5
+
+# Rejected-edit buffer file path (lazy-computed).
+_BUFFER_PATH: Optional[Path] = None
+
+
+def _buffer_path() -> Path:
+    global _BUFFER_PATH
+    if _BUFFER_PATH is None:
+        from hermes_constants import get_hermes_home
+        _BUFFER_PATH = get_hermes_home() / "skill_rejected_edits.json"
+    return _BUFFER_PATH
+
+
+# ── Token estimation ───────────────────────────────────────────────────────
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token."""
+    return max(1, len(text) // 4)
+
+
+def _estimate_chars(tokens: int) -> int:
+    return tokens * 4
+
+
+# ── Skill snapshot ─────────────────────────────────────────────────────────
+
+def _get_curator_skills_dir() -> Path:
+    """Return the curator-managed skills directory."""
+    from tools.skill_manager_tool import _skills_dir
+    return _skills_dir()
+
+
+def _list_curator_skills() -> List[Path]:
+    """List all SKILL.md paths under the curator-managed skills dir."""
+    skills_dir = _get_curator_skills_dir()
+    if not skills_dir.exists():
+        return []
+    result = []
+    for skill_md in skills_dir.rglob("SKILL.md"):
+        # Skip bundled/hub/external skills — only curator-managed ones.
+        # The curator skills dir is ~/.hermes/skills/ which is all curator-managed.
+        result.append(skill_md)
+    return result
+
+
+def snapshot_skills() -> Dict[str, Dict[str, Any]]:
+    """Take a snapshot of all curator-managed skills before review.
+
+    Returns ``{skill_name: {"path": Path, "content": str, "tokens": int}}``.
+    """
+    snapshot: Dict[str, Dict[str, Any]] = {}
+    for skill_md in _list_curator_skills():
+        try:
+            content = skill_md.read_text(encoding="utf-8", errors="replace")
+            name = skill_md.parent.name
+            snapshot[name] = {
+                "path": skill_md,
+                "content": content,
+                "tokens": _estimate_tokens(content),
+            }
+        except Exception as exc:
+            logger.debug("skill_gate: failed to snapshot %s: %s", skill_md, exc)
+    return snapshot
+
+
+# ── Similarity / dedup ─────────────────────────────────────────────────────
+
+def _tokenize(text: str) -> Set[str]:
+    """Simple word tokenizer for Jaccard similarity."""
+    return set(re.findall(r"\b\w{3,}\b", text.lower()))
+
+
+def _jaccard(a: Set[str], b: Set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    intersection = a & b
+    union = a | b
+    return len(intersection) / len(union) if union else 0.0
+
+
+def _find_duplicate(
+    skill_name: str,
+    content: str,
+    snapshot: Dict[str, Dict[str, Any]],
+) -> Optional[str]:
+    """Check if ``content`` is too similar to any other existing skill.
+
+    Returns the name of the duplicate skill, or None.
+    """
+    tokens = _tokenize(content)
+    if not tokens:
+        return None
+    for name, info in snapshot.items():
+        if name == skill_name:
+            continue
+        other_tokens = _tokenize(info["content"])
+        sim = _jaccard(tokens, other_tokens)
+        if sim >= _DEDUP_THRESHOLD:
+            return name
+    return None
+
+
+# ── Validation ─────────────────────────────────────────────────────────────
+
+def validate_skill_edits(
+    before: Dict[str, Dict[str, Any]],
+    after: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Validate skill edits between before/after snapshots.
+
+    Returns a list of validation results:
+    ``{"skill": name, "action": "revert"|"keep", "reason": str, ...}``
+    """
+    results: List[Dict[str, Any]] = []
+
+    # Check new skills (in after but not before)
+    for name, info in after.items():
+        if name in before:
+            continue
+        # New skill created by review
+        content = info["content"]
+        tokens = info["tokens"]
+
+        # Check size
+        if tokens > _MAX_SKILL_SIZE_TOKENS:
+            results.append({
+                "skill": name,
+                "action": "revert",
+                "reason": f"size_overflow:{tokens}t>{_MAX_SKILL_SIZE_TOKENS}t",
+                "path": str(info["path"]),
+                "content": content,
+            })
+            continue
+
+        # Check dedup
+        dup = _find_duplicate(name, content, before)
+        if dup:
+            results.append({
+                "skill": name,
+                "action": "revert",
+                "reason": f"duplicate_of:{dup}",
+                "path": str(info["path"]),
+                "content": content,
+            })
+            continue
+
+        results.append({
+            "skill": name,
+            "action": "keep",
+            "reason": "new_skill_ok",
+            "tokens": tokens,
+        })
+
+    # Check modified skills (in both, content changed)
+    for name, info in after.items():
+        if name not in before:
+            continue
+        old_info = before[name]
+        old_content = old_info["content"]
+        new_content = info["content"]
+        if old_content == new_content:
+            continue  # No change
+
+        old_tokens = old_info["tokens"]
+        new_tokens = info["tokens"]
+        delta = new_tokens - old_tokens
+
+        # Learning-rate budget: reject if growth exceeds budget
+        if delta > _MAX_SKILL_EDIT_TOKENS:
+            results.append({
+                "skill": name,
+                "action": "revert",
+                "reason": f"lr_budget_exceeded:delta={delta}t>budget={_MAX_SKILL_EDIT_TOKENS}t",
+                "path": str(info["path"]),
+                "old_content": old_content,
+                "new_content": new_content,
+                "delta_tokens": delta,
+            })
+            continue
+
+        # Absolute size cap
+        if new_tokens > _MAX_SKILL_SIZE_TOKENS:
+            results.append({
+                "skill": name,
+                "action": "revert",
+                "reason": f"size_overflow:{new_tokens}t>{_MAX_SKILL_SIZE_TOKENS}t",
+                "path": str(info["path"]),
+                "old_content": old_content,
+                "new_content": new_content,
+            })
+            continue
+
+        results.append({
+            "skill": name,
+            "action": "keep",
+            "reason": "edit_ok",
+            "delta_tokens": delta,
+            "old_tokens": old_tokens,
+            "new_tokens": new_tokens,
+        })
+
+    return results
+
+
+# ── Revert ─────────────────────────────────────────────────────────────────
+
+def revert_skill(
+    skill_path: Path,
+    old_content: Optional[str] = None,
+    delete_if_new: bool = True,
+) -> bool:
+    """Revert a skill to its previous content, or delete if it was newly created.
+
+    Returns True on success.
+    """
+    try:
+        if old_content is not None:
+            skill_path.write_text(old_content, encoding="utf-8")
+            logger.info("skill_gate: reverted %s to previous content", skill_path)
+        elif delete_if_new:
+            # New skill that was rejected — delete the skill directory
+            skill_dir = skill_path.parent
+            import shutil
+            shutil.rmtree(skill_dir, ignore_errors=True)
+            logger.info("skill_gate: deleted rejected new skill %s", skill_dir)
+        return True
+    except Exception as exc:
+        logger.warning("skill_gate: failed to revert %s: %s", skill_path, exc)
+        return False
+
+
+# ── Rejected-edit buffer ───────────────────────────────────────────────────
+
+def _load_buffer() -> Dict[str, List[Dict[str, Any]]]:
+    """Load the rejected-edit buffer from disk."""
+    path = _buffer_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception as exc:
+        logger.debug("skill_gate: failed to load rejected buffer: %s", exc)
+    return {}
+
+
+def _save_buffer(buffer: Dict[str, List[Dict[str, Any]]]) -> None:
+    """Save the rejected-edit buffer to disk."""
+    path = _buffer_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(buffer, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.warning("skill_gate: failed to save rejected buffer: %s", exc)
+
+
+def add_to_rejected_buffer(
+    skill_name: str,
+    reason: str,
+    content: str,
+    old_content: Optional[str] = None,
+) -> None:
+    """Add a rejected edit to the buffer."""
+    buffer = _load_buffer()
+    entries = buffer.setdefault(skill_name, [])
+    entries.append({
+        "reason": reason,
+        "content_preview": content[:200],
+        "content_tokens": _estimate_tokens(content),
+        "old_content_preview": (old_content or "")[:200] if old_content else None,
+        "timestamp": time.time(),
+    })
+    # Trim to max per skill
+    if len(entries) > _MAX_REJECTED_PER_SKILL:
+        buffer[skill_name] = entries[-_MAX_REJECTED_PER_SKILL:]
+    _save_buffer(buffer)
+
+
+def get_rejected_summary(skill_name: Optional[str] = None) -> str:
+    """Return a human-readable summary of rejected edits."""
+    buffer = _load_buffer()
+    if skill_name:
+        entries = buffer.get(skill_name, [])
+    else:
+        entries = []
+        for name, ents in buffer.items():
+            for e in ents:
+                entries.append({**e, "skill": name})
+
+    if not entries:
+        return "(no rejected edits)"
+
+    lines = []
+    for e in entries[-10:]:
+        skill = e.get("skill", skill_name or "?")
+        reason = e.get("reason", "?")
+        ts = time.strftime("%Y-%m-%d %H:%M", time.gmtime(e.get("timestamp", 0)))
+        lines.append(f"  {skill}: {reason} ({ts})")
+    return "\n".join(lines)
+
+
+# ── Mining recurring tasks ─────────────────────────────────────────────────
+
+def mine_recurring_tasks(
+    session_db: Any,
+    session_id: str,
+    lookback_hours: int = 168,
+    min_repeats: int = 3,
+) -> List[Dict[str, Any]]:
+    """Mine recurring task patterns from recent sessions in state.db.
+
+    Looks at user messages across recent sessions and finds repeated
+    task patterns (by tool usage similarity and user message keywords).
+
+    Returns a list of ``{"pattern": str, "count": int, "sessions": list}``.
+    """
+    patterns: Dict[str, List[str]] = {}
+    try:
+        # Get recent sessions
+        cutoff = time.time() - (lookback_hours * 3600)
+        rows = session_db._execute_read_all(
+            "SELECT id, started_at FROM sessions "
+            "WHERE started_at > ? AND parent_session_id IS NULL "
+            "ORDER BY started_at DESC LIMIT 50",
+            (cutoff,),
+        )
+        if not rows:
+            return []
+
+        for row in rows:
+            sid = row["id"] if isinstance(row, dict) else row[0]
+            # Get user messages for this session
+            msgs = session_db._execute_read_all(
+                "SELECT content FROM messages "
+                "WHERE session_id = ? AND role = 'user' AND active = 1 "
+                "ORDER BY id LIMIT 5",
+                (sid,),
+            )
+            if not msgs:
+                continue
+            # Extract first user message as task signature
+            first_msg = msgs[0]
+            content = first_msg["content"] if isinstance(first_msg, dict) else first_msg[0]
+            if not content or not isinstance(content, str):
+                continue
+            # Normalize: lowercase, strip, take first 100 chars
+            signature = content.strip().lower()[:100]
+            # Simple pattern: first 5 words
+            words = re.findall(r"\b\w+\b", signature)
+            pattern_key = " ".join(words[:5]) if len(words) >= 3 else None
+            if pattern_key:
+                patterns.setdefault(pattern_key, []).append(sid)
+
+    except Exception as exc:
+        logger.debug("skill_gate: mining recurring tasks failed: %s", exc)
+        return []
+
+    # Filter to patterns that repeat enough
+    result = []
+    for pattern, sids in patterns.items():
+        if len(sids) >= min_repeats:
+            result.append({
+                "pattern": pattern,
+                "count": len(sids),
+                "sessions": sids[:5],
+            })
+    result.sort(key=lambda x: x["count"], reverse=True)
+    return result[:5]
+
+
+# ── Full gate pipeline ─────────────────────────────────────────────────────
+
+def run_skill_gate(
+    before: Dict[str, Dict[str, Any]],
+) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
+    """Run the full validation gate after a background review.
+
+    Takes the ``before`` snapshot (from ``snapshot_skills()``) and:
+    1. Takes an ``after`` snapshot
+    2. Validates all edits
+    3. Reverts rejected edits
+    4. Adds rejected edits to the buffer
+
+    Returns ``(after_snapshot, validation_results)``.
+    """
+    after = snapshot_skills()
+    results = validate_skill_edits(before, after)
+
+    for r in results:
+        if r["action"] != "revert":
+            continue
+        skill_name = r["skill"]
+        skill_path = Path(r["path"])
+        old_content = r.get("old_content")
+        new_content = r.get("new_content") or r.get("content", "")
+
+        # Revert
+        revert_skill(skill_path, old_content=old_content, delete_if_new=(old_content is None))
+
+        # Add to rejected buffer
+        add_to_rejected_buffer(skill_name, r["reason"], new_content, old_content)
+
+        logger.info(
+            "skill_gate: REJECTED edit to '%s' — %s",
+            skill_name, r["reason"],
+        )
+
+    # Re-snapshot after reverts to get clean state
+    if any(r["action"] == "revert" for r in results):
+        after = snapshot_skills()
+
+    return after, results
+
+
+def format_gate_report(results: List[Dict[str, Any]]) -> str:
+    """Format validation results as a human-readable report."""
+    if not results:
+        return ""
+    reverted = [r for r in results if r["action"] == "revert"]
+    kept = [r for r in results if r["action"] == "keep"]
+    if not reverted:
+        return ""
+    lines = ["  🚫 Skill gate rejected:"]
+    for r in reverted:
+        lines.append(f"    • {r['skill']}: {r['reason']}")
+    return "\n".join(lines)
+
+
+# ── Prompt augmentation ────────────────────────────────────────────────────
+
+def build_mining_context(agent: Any) -> str:
+    """Build additional context for the review prompt from mining.
+
+    Queries state.db for recurring task patterns and formats them
+    as additional context for the review agent.
+    """
+    session_db = getattr(agent, "_session_db", None)
+    if session_db is None:
+        return ""
+    session_id = getattr(agent, "session_id", "")
+    if not session_id:
+        return ""
+
+    try:
+        patterns = mine_recurring_tasks(session_db, session_id)
+    except Exception:
+        return ""
+
+    if not patterns:
+        return ""
+
+    lines = ["\n\nRECURRING TASK PATTERNS (from recent sessions):"]
+    for p in patterns:
+        lines.append(f"  • '{p['pattern']}' — seen {p['count']} times")
+    lines.append(
+        "Consider whether existing skills cover these patterns well, "
+        "or if a skill update would improve handling of recurring work."
+    )
+    return "\n".join(lines)
+
+
+def build_budget_instruction() -> str:
+    """Return instruction text about the learning-rate budget for the review prompt."""
+    return (
+        f"\n\nSKILL EDIT BUDGET: You may add at most {_MAX_SKILL_EDIT_TOKENS} tokens "
+        f"(~{_MAX_SKILL_EDIT_CHARS} chars) to any single skill file in this pass. "
+        f"If a skill needs more changes, spread them across multiple review passes. "
+        f"Target skill size: 300-{_MAX_SKILL_SIZE_TOKENS} tokens. "
+        f"If a skill is already near {_MAX_SKILL_SIZE_TOKENS} tokens, TRIM it — do not add more."
+    )
+
+
+__all__ = [
+    "snapshot_skills",
+    "run_skill_gate",
+    "format_gate_report",
+    "build_mining_context",
+    "build_budget_instruction",
+    "get_rejected_summary",
+    "mine_recurring_tasks",
+]

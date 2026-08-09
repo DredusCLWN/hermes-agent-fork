@@ -25,6 +25,13 @@ import os
 from typing import Any, Dict, List, Optional
 
 from agent.thread_scoped_output import thread_scoped_silence
+from agent.skill_gate import (
+    snapshot_skills,
+    run_skill_gate,
+    format_gate_report,
+    build_mining_context,
+    build_budget_instruction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +409,21 @@ _COMBINED_REVIEW_PROMPT = (
     "standalone constraint.\n\n"
     "Act on whichever of the two dimensions has real signal. If "
     "genuinely nothing stands out on either, say 'Nothing to save.' "
-    "and stop — but don't reach for that conclusion as a default."
+    "and stop — but don't reach for that conclusion as a default.\n\n"
+    "SKILL PRUNING: If you notice skills that are clearly stale — "
+    "superseded by newer ones, referencing deprecated APIs, or "
+    "describing workflows that no longer match the current codebase — "
+    "recommend archiving them via skill_manage(action='delete') ONLY "
+    "for non-protected skills. Do not delete bundled, hub-installed, "
+    "pinned, or user-owned skills. If unsure whether a skill is still "
+    "relevant, leave it — false positives here are worse than false "
+    "negatives.\n\n"
+    "MEMORY COMPACTION: If MEMORY.md has grown large (more than ~150 "
+    "lines), consolidate older entries — merge related items, remove "
+    "stale one-time observations, and keep the most actionable and "
+    "durable facts. The goal is a compact, high-signal memory file, "
+    "not an append-only log. Preserve user preferences and identity "
+    "information — only trim stale situational notes."
 )
 
 
@@ -684,6 +705,8 @@ def _run_review_in_thread(
 
     review_agent = None
     review_messages: List[Dict] = []
+    _skill_snapshot_before: Dict[str, Dict[str, Any]] = {}
+    _gate_results: List[Dict[str, Any]] = []
     try:
         # Silence stdout/stderr for THIS worker thread only.  A process-global
         # ``contextlib.redirect_stdout(devnull)`` here would also blank
@@ -914,6 +937,21 @@ def _run_review_in_thread(
             except Exception:
                 pass
 
+            # ── Skill gate: snapshot before review ──
+            try:
+                _skill_snapshot_before = snapshot_skills()
+            except Exception as exc:
+                logger.debug("skill_gate: pre-review snapshot failed: %s", exc)
+
+            # Augment prompt with budget instruction and mining context
+            _augmented_prompt = prompt + build_budget_instruction()
+            try:
+                _mining_ctx = build_mining_context(agent)
+                if _mining_ctx:
+                    _augmented_prompt += _mining_ctx
+            except Exception:
+                pass
+
             try:
                 # Routed to a different model -> replay a digest (cache is cold
                 # on that model anyway, so minimise cold-written tokens). Same
@@ -924,7 +962,7 @@ def _run_review_in_thread(
                 )
                 review_agent.run_conversation(
                     user_message=(
-                        prompt
+                        _augmented_prompt
                         + "\n\nYou can only call memory and skill "
                         "management tools. Other tools will be denied "
                         "at runtime — do not attempt them."
@@ -952,6 +990,13 @@ def _run_review_in_thread(
             except Exception:
                 pass
             review_agent = None
+
+        # ── Skill gate: validate and revert rejected edits ──
+        if _skill_snapshot_before:
+            try:
+                _, _gate_results = run_skill_gate(_skill_snapshot_before)
+            except Exception as exc:
+                logger.debug("skill_gate: post-review gate failed: %s", exc)
 
         # Scan the review agent's messages for successful tool actions
         # and surface a compact summary to the user. Tool messages
@@ -996,6 +1041,18 @@ def _run_review_in_thread(
                     )
                 except Exception:
                     pass
+
+        # Report skill gate rejections to the user
+        if _gate_results:
+            _gate_report = format_gate_report(_gate_results)
+            if _gate_report:
+                agent._safe_print(_gate_report)
+                _bg_cb = agent.background_review_callback
+                if _bg_cb:
+                    try:
+                        _bg_cb(_gate_report.strip())
+                    except Exception:
+                        pass
 
     except Exception as e:
         logger.warning("Background memory/skill review failed: %s", e)
