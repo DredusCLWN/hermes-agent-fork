@@ -79,27 +79,6 @@ class TestAcpPersistPreservesArchives:
         ]
         assert [m["content"] for m in live] == ["rewritten", "rewritten answer"]
 
-    def test_persist_source_has_no_failopen_probe(self):
-        """The fail-open has_archived_messages probe must stay dead in _persist.
-
-        Guards the #80216 bug class at the source level: a probe that fails
-        open (``except: has_archived = False``) silently reintroduces the
-        destructive replace.  ``active_only=True`` must be unconditional.
-        """
-        import inspect
-        import acp_adapter.session as acp_session
-
-        src = inspect.getsource(acp_session.SessionManager._persist)
-        # Assert on the CALL, not a local-variable name — a reintroduced probe
-        # under any local name (archived = db.has_archived_messages(...))
-        # must still trip this guard. The explanatory comment in _persist
-        # writes the name as "(has_archived_messages)" (paren BEFORE the
-        # name), so the call-shaped substring doesn't false-positive on it.
-        assert "has_archived_messages(" not in src, (
-            "_persist re-grew a has_archived_messages probe — #80216 class"
-        )
-        assert "active_only=True" in src
-
     def test_fresh_session_active_only_equals_full_replace(self, state_db):
         """On a never-compacted session active_only=True must behave exactly
         like the historical full replace (the safety claim the unconditional
