@@ -16,7 +16,7 @@
 
 ## Что это
 
-Форк [Hermes Agent](https://github.com/NousResearch/hermes-agent) — self-improving AI агента от Nous Research. **Не официальный релиз, не поддерживается Nous Research.** Ставьте на свой риск. Форк поддерживает upstream-синхронизацию через `scripts/merge-upstream.sh` и избирательно удаляет модули, которые не нужны в данной конфигурации.
+Форк [Hermes Agent](https://github.com/NousResearch/hermes-agent) — self-improving AI агента от Nous Research. **Не официальный релиз, не поддерживается Nous Research.** Ставьте на свой риск. Форк поддерживает upstream-синхронизацию через `scripts/merge-upstream.sh` и вырезает функции, не нужные автору (cron, voice/wake, ACP, i18n, pet) — остальное работает как в upstream.
 
 ### Что изменено
 
