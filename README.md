@@ -45,13 +45,30 @@
 
 ## Установка
 
-### Windows (PowerShell)
+### Desktop App (Windows) — самый простой путь
+
+Скачайте установщик с [GitHub Releases](https://github.com/DredusCLWN/hermes-agent-fork/releases):
+
+1. Откройте `https://github.com/DredusCLWN/hermes-agent-fork/releases` в браузере
+2. Скачайте `Hermes-0.20.0-win-x64.exe` (NSIS установщик, ~113 МБ)
+3. Запустите — установщик поставит desktop app
+4. При первом запуске app сам скачает и установит Python-бэкенд (uv, Python 3.11, Node.js, ripgrep, ffmpeg, PortableGit)
+
+**Ничего не нужно устанавливать заранее — только интернет.**
+
+> SmartScreen предупредит о неподписанном exe — нажмите «Run anyway». Форк не имеет code-signing сертификата.
+
+### Windows (PowerShell) — CLI-установка
 
 ```powershell
+# Вариант A: через fork-install.ps1 (нужен Git for Windows)
 powershell -ExecutionPolicy Bypass -File fork-install.ps1
+
+# Вариант B: без Git — установщик сам скачает PortableGit
+irm https://raw.githubusercontent.com/DredusCLWN/hermes-agent-fork/v2026.8.10/scripts/install.ps1 | iex
 ```
 
-Опции:
+Опции `fork-install.ps1`:
 
 ```powershell
 # Пин к конкретному тегу
@@ -69,11 +86,27 @@ powershell -ExecutionPolicy Bypass -File fork-install.ps1 -NoShortcut
 
 Установщик:
 1. Клонирует форк по тегу (`git clone --depth 1 --branch <tag>`)
-2. Передаёт управление `scripts/install.ps1` (uv, Python 3.11, Node.js, ripgrep, ffmpeg, MinGit)
+2. Передаёт управление `scripts/install.ps1` (uv, Python 3.11, Node.js, ripgrep, ffmpeg, PortableGit)
 3. Создаёт `.env` template для API-ключей
 4. Создаёт ярлык desktop (если собран)
 
-**Требования:** [Git for Windows](https://git-scm.com).
+**Требования для варианта A:** [Git for Windows](https://git-scm.com). **Для варианта B:** ничего, только интернет.
+
+### Windows (CMD)
+
+```cmd
+:: Только клонировать
+ git clone --depth 1 --branch v2026.8.10 https://github.com/DredusCLWN/hermes-agent-fork C:\hermes
+cd C:\hermes
+
+ :: Клонировать + полная установка
+ git clone --depth 1 --branch v2026.8.10 https://github.com/DredusCLWN/hermes-agent-fork C:\hermes
+cd C:\hermes
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+
+ :: Без Git — одна команда
+powershell -Command "irm https://raw.githubusercontent.com/DredusCLWN/hermes-agent-fork/v2026.8.10/scripts/install.ps1 | iex"
+```
 
 ### Linux, macOS, WSL2
 
@@ -169,6 +202,19 @@ uv pip install -e ".[all,dev]"
 scripts/run_tests.sh
 ```
 
+### Desktop App сборка
+
+```powershell
+# Из корня репо
+npm ci
+cd apps\desktop
+npm run dist:win
+
+# Результат: apps\desktop\release\Hermes-0.20.0-win-x64.exe
+```
+
+Требуется Node.js 22+ и ~5 ГБ свободного места. CI workflow `release-desktop.yml` собирает автоматически при push тега `v*`.
+
 ### Upstream sync
 
 ```bash
@@ -190,6 +236,7 @@ scripts/merge-upstream.sh
 | `fork-install.ps1` | Wrapper установщика форка |
 | `scripts/merge-upstream.sh` | Upstream sync + REMOVE_LIST |
 | `.github/workflows/release-node-dists.yml` | CI: сборка JS-dist на тег |
+| `.github/workflows/release-desktop.yml` | CI: сборка desktop exe на тег |
 | `plugins/memory/holographic/store.py` | Версионирование schema + миграции |
 | `agent/live_session_registry.py` | Live session tracking |
 | `agent/refine_snapshot.py` | Refine snapshot logic |
