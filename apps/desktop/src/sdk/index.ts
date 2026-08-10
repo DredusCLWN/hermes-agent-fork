@@ -106,16 +106,28 @@ export const host = {
   status: async () => getStatus(),
 
   /** Gateway JSON-RPC — sessions, config, skills, cron, kanban, everything
-   *  the app itself uses. Lazy: resolves the LIVE socket per call. */
-  request: async <T>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
-    const gateway = $gateway.get()
+     *  the app itself uses. Lazy: resolves the LIVE socket per call. A reserved
+     *  `timeoutMs` key in params overrides the socket's default per-call window
+     *  for slow RPCs (llm.oneshot, /compress-style calls) and is NOT forwarded
+     *  to the backend. */
+    request: async <T>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
+      const gateway = $gateway.get()
 
-    if (!gateway) {
-      throw new Error('Hermes gateway unavailable')
+      if (!gateway) {
+        throw new Error('Hermes gateway unavailable')
+      }
+
+      let timeoutMs: number | undefined
+
+      if (typeof params.timeoutMs === 'number' && Number.isFinite(params.timeoutMs)) {
+        timeoutMs = params.timeoutMs
+        const rest: Record<string, unknown> = { ...params }
+        delete rest.timeoutMs
+        params = rest
+      }
+
+      return gateway.request<T>(method, params, timeoutMs)
     }
-
-    return gateway.request<T>(method, params)
-  }
 }
 
 // -- react bridge -------------------------------------------------------------

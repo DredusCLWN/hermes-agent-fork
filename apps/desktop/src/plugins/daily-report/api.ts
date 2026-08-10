@@ -188,7 +188,11 @@ export async function generateReport(sessionId: string, ctx: MemoryContext): Pro
     input,
     task: 'reasoning',
     max_tokens: 2400,
-    temperature: 0.4
+    temperature: 0.4,
+    // Заренсервированный SDK-ключ: поднимает RPC-окно над дефолтными 30с
+    // (бэкендный oneshot-таймаут — 120с; без этого на медленных моделях
+    // десктоп убивает запрос раньше, чем придёт ответ).
+    timeoutMs: 180_000
   })
   const text = (res?.output || res?.text || '').trim()
   if (!text) throw new Error('Модель вернула пустой ответ')
