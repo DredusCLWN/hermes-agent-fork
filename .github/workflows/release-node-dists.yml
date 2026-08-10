@@ -1,0 +1,63 @@
+# Build the JS side of the fork into release assets on every tag push.
+#
+# Rationale: friends installing the fork should not need Node.js. The
+# canonical install.ps1 can bootstrap node, but prebuilt dists make the
+# no-Node path the fast path. Assets land on the GitHub Release that the
+# tag creates, named by tag so install tooling can pin them.
+#
+# Builds:
+#   - web/  -> hermes_cli/web_dist  (vite outDir)
+#   - ui-tui -> ui-tui dist (ink TUI)
+#   - apps/shared + apps/desktop are NOT built here — the desktop app is a
+#     separate download; -IncludeDesktop on the canonical installer builds
+#     from source. Revisit when the fork ships its own desktop binaries.
+
+name: release-node-dists
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install root deps
+        run: npm ci
+        shell: bash
+
+      - name: Build web (-> hermes_cli/web_dist)
+        run: |
+          npm ci --prefix web
+          npm run build --prefix web
+        shell: bash
+
+      - name: Build ui-tui
+        run: |
+          npm ci --prefix ui-tui
+          npm run build --prefix ui-tui
+        shell: bash
+
+      - name: Package dists
+        run: |
+          mkdir -p release-assets
+          cd hermes_cli && zip -r ../release-assets/web-dist.zip web_dist
+          cd ../ui-tui && zip -r ../release-assets/ui-tui-dist.zip dist
+        shell: bash
+
+      - name: Publish to the tag's GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*.zip
+          generate_release_notes: true
