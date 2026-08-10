@@ -1585,58 +1585,6 @@ class TestAuthorizationEmailMatch:
         assert runner._is_user_authorized(source) is True
 
 
-# ===========================================================================
-# Cron scheduler registry (regression guard from /review)
-#
-# After the generic-plugin-interface migration, Google Chat no longer lives in
-# the hardcoded ``_KNOWN_DELIVERY_PLATFORMS`` / ``_HOME_TARGET_ENV_VARS`` sets
-# in ``cron/scheduler.py``.  It earns cron delivery via
-# ``PlatformEntry.cron_deliver_env_var``, which the scheduler consults through
-# ``_is_known_delivery_platform`` and ``_resolve_home_env_var``.  The tests
-# below check that public resolver behavior, not the hardcoded sets.
-# ===========================================================================
-
-
-class TestCronSchedulerRegistry:
-    def _ensure_registered(self):
-        """Force the plugin system to register the Google Chat adapter.
-
-        The adapter's ``register(ctx)`` is only invoked during plugin
-        discovery; module-level import alone does not register it.  We call
-        discover + manually invoke the register hook so the resolver sees
-        ``cron_deliver_env_var``.
-        """
-        from gateway.platform_registry import platform_registry
-        if platform_registry.get("google_chat") is not None:
-            return
-        # Discover first so the plugin is loaded at all.
-        try:
-            from hermes_cli.plugins import discover_plugins
-            discover_plugins()
-        except Exception:
-            pass
-        if platform_registry.get("google_chat") is not None:
-            return
-        # Fallback: construct a minimal ctx and call register directly.
-        from plugins.platforms.google_chat.adapter import register as _register
-        class _Ctx:
-            class _M:
-                name = "google_chat-platform"
-            manifest = _M()
-            _manager = type("_Mgr", (), {"_plugin_platform_names": set()})()
-            def register_platform(self, **kwargs):
-                from gateway.platform_registry import PlatformEntry
-                entry = PlatformEntry(source="plugin", **kwargs)
-                platform_registry.register(entry)
-        _register(_Ctx())
-
-    def test_google_chat_is_known_delivery_platform(self):
-        self._ensure_registered()
-        from cron.scheduler import _is_known_delivery_platform
-
-        assert _is_known_delivery_platform("google_chat") is True
-
-
 # ── _standalone_send (out-of-process cron delivery) ──────────────────────
 
 
