@@ -529,7 +529,10 @@ class GatewayKanbanWatchersMixin:
                         # non-push adapters, skip the doomed send attempt
                         # entirely: there is nothing to text-notify, the
                         # creator is woken via the self-post below instead.
-                        from gateway.wake import adapter_supports_push
+                        try:
+                            from gateway.wake import adapter_supports_push
+                        except ImportError:
+                            adapter_supports_push = lambda *_a, **_kw: False
 
                         if not adapter_supports_push(adapter):
                             logger.debug(
@@ -637,7 +640,10 @@ class GatewayKanbanWatchersMixin:
                         task_terminal = task and task.status in {"done", "archived"}
                         _WAKE_KINDS = ("completed", "gave_up", "crashed", "timed_out", "blocked")
                         _wake_kinds = {ev.kind for ev in d["events"] if ev.kind in _WAKE_KINDS}
-                        from gateway.wake import adapter_supports_push as _adapter_push_ok
+                        try:
+                            from gateway.wake import adapter_supports_push as _adapter_push_ok
+                        except ImportError:
+                            _adapter_push_ok = lambda *_a, **_kw: False
 
                         _is_push_adapter = _adapter_push_ok(adapter)
                         _session_key = ""
@@ -666,7 +672,11 @@ class GatewayKanbanWatchersMixin:
                         if not _is_push_adapter and _wake_kinds and _session_key:
                             # Wake self-post IS the delivery on this path —
                             # it must succeed BEFORE the cursor advances.
-                            from gateway.wake import deliver_wake
+                            try:
+                                from gateway.wake import deliver_wake
+                            except ImportError:
+                                logger.debug("gateway.wake not available; skipping wake self-post")
+                                continue
 
                             try:
                                 await deliver_wake(
@@ -730,7 +740,11 @@ class GatewayKanbanWatchersMixin:
                         if _is_push_adapter and _wake_kinds and _session_key:
                             try:
                                 from gateway.session import SessionSource
-                                from gateway.wake import deliver_wake
+                                try:
+                                    from gateway.wake import deliver_wake
+                                except ImportError:
+                                    logger.debug("gateway.wake not available; skipping push wake")
+                                    continue
                                 # Rebuild the creator's real session scope from
                                 # the chat_type persisted on the subscription
                                 # row (#56580). build_session_key() keys DMs

@@ -161,7 +161,11 @@ def _start_desktop_cron_ticker(stop_event: "threading.Event", interval: int = 60
     real gateway on the same HERMES_HOME — whichever process grabs the lock
     first wins the tick.
     """
-    from cron.scheduler_provider import resolve_cron_scheduler
+    try:
+        from cron.scheduler_provider import resolve_cron_scheduler
+    except ImportError:
+        _log.warning("cron module not available in this fork; desktop scheduler disabled")
+        return
 
     provider = resolve_cron_scheduler()
     _log.info("Desktop cron scheduler started (provider=%s, interval=%ds)", provider.name, interval)
@@ -11221,7 +11225,10 @@ def _call_cron_for_profile(target_profile: Optional[str], func_name: str, *args,
     try:
         with cron_jobs.use_cron_store(home):
             if func_name == "create_job":
-                from cron.scheduler import create_job_with_scheduler_registration
+                try:
+                    from cron.scheduler import create_job_with_scheduler_registration
+                except ImportError:
+                    raise HTTPException(status_code=501, detail="cron module not available in this fork")
 
                 result = create_job_with_scheduler_registration(*args, **kwargs)
             else:
@@ -11281,7 +11288,10 @@ def _raise_if_cron_registration_error(e: Exception) -> None:
     Shared by every dashboard cron-create surface so the contract can't
     drift between copies. The lazy import keeps cron out of module import.
     """
-    from cron.scheduler import CronSchedulerRegistrationError
+    try:
+        from cron.scheduler import CronSchedulerRegistrationError
+    except ImportError:
+        return
 
     if isinstance(e, CronSchedulerRegistrationError):
         raise HTTPException(status_code=424, detail=e.to_dict()) from e
@@ -11486,8 +11496,11 @@ def _fire_cron_job_for_profile(profile: str, job_id: str) -> bool:
     send path.
     """
     _profile_name, home = _cron_profile_home(profile)
-    from cron import jobs as cron_jobs
-    from cron.scheduler_provider import resolve_cron_scheduler
+    try:
+        from cron import jobs as cron_jobs
+        from cron.scheduler_provider import resolve_cron_scheduler
+    except ImportError:
+        raise HTTPException(status_code=501, detail="cron module not available in this fork")
     from hermes_constants import (
         reset_hermes_home_override,
         set_hermes_home_override,

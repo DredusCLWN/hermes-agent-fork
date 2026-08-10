@@ -21126,7 +21126,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     raw_sid = _sk
             if raw_sid:
                 adapter = self.adapters.get(Platform.API_SERVER)
-                from gateway.wake import adapter_supports_push, deliver_wake
+                try:
+                    from gateway.wake import adapter_supports_push, deliver_wake
+                except ImportError:
+                    logger.debug("gateway.wake not available; skipping watch notification")
+                    return False
                 if adapter is not None and not adapter_supports_push(adapter):
                     try:
                         logger.info(
@@ -21162,14 +21166,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 break
         if not adapter:
             return None
-        from gateway.wake import adapter_supports_push as _wake_push_ok
+        try:
+            from gateway.wake import adapter_supports_push as _wake_push_ok
+        except ImportError:
+            logger.debug("gateway.wake not available; skipping watch notification")
+            return None
         if not _wake_push_ok(adapter):
             # Non-push adapter (api_server) resolved WITH routing metadata:
             # its chat_id is the raw session id (see _bind_api_server_session,
             # which binds chat_id = session_id). handle_message would run the
             # wake under a build_session_key()-derived key that never matches
             # the raw X-Hermes-Session-Id session — self-post instead.
-            from gateway.wake import deliver_wake
+            try:
+                from gateway.wake import deliver_wake
+            except ImportError:
+                logger.debug("gateway.wake not available; skipping watch self-post")
+                return None
             raw_sid = str(evt.get("origin_session_id") or "").strip() or str(source.chat_id or "")
             try:
                 logger.info(

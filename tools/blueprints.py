@@ -206,7 +206,10 @@ def create_blueprint_job(
     optional ``prompt`` becomes the task instruction. Delivery, model, and
     toolsets carry through. Returns the created job dict.
     """
-    from cron.jobs import create_job
+    try:
+        from cron.jobs import create_job
+    except ImportError:
+        raise RuntimeError("cron module not available in this fork") from None
 
     job_spec = blueprint_to_job_spec(spec, name=name)
     if origin is not None:

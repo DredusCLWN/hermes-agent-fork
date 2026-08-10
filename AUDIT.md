@@ -1,7 +1,7 @@
 # Hermes: Audit — грязь, хвосты, мусор
 
 > Дата: 2026-08-10
-> Статус: аудит проведён, две проходки завершены, действия не начаты
+> Статус: аудит проведён, выпил мёртвых модулей завершён (9 коммитов), CI исправлен
 
 ---
 
@@ -9,39 +9,26 @@
 
 Кодовая база **структурно чистая** — 0 коммиченных мусор-файлов (pyc/bak/tmp/__pycache__ — гоняется). Проблема не в мусоре, а в четырёх системных дырах:
 
-1. **Политика удаления модулей сломана** — cron/voice/ACP/i18n вернулись через upstream-мержи
-2. **Untracked ценное** — merge-upstream.sh, durability-тесты, новые модули не закоммичены
+1. **Мёртвые модули выпилены** — cron/voice/ACP/i18n/pet удалены (+28937 строк), REMOVE_LIST в merge-upstream.sh предотвращает возврат. Все продакшн-импорты guarded (try/except ImportError → RuntimeError/fallback). Тесты вычищены (9 коммитов).
+2. **Untracked ценное** — merge-upstream.sh, durability-тесты, новые модули закоммичены
 3. **Структурный долг** — 7 файлов >10K строк, 5+ дублей atomic_write, ~2,529 silent `except: pass`
-4. **4 мёртвых модуля** — `memory_monitor`, `stream_dispatch`, `container_boot`, `session_recap` (подтверждено второй проходкой)
+4. **4 мёртвых модуля** — `memory_monitor`, `stream_dispatch`, `container_boot`, `session_recap` (подтверждено второй проходкой, не выпилены)
 
 ---
 
-## 1. Удалённые модули ВЕРНУЛИСЬ (P1 — системная проблема)
+## 1. Мёртвые модули ВЫПИЛЕНЫ (P1 — завершено)
 
-| Модуль | Статус | Доказательство |
+| Модуль | Статус | Коммиты |
 |---|---|---|
-| **cron** | жив | 23 файла, ~830KB. Глубокая интеграция: config_defaults (preflight, fail-closed), config.py (стр. 2901, 4533-4571), cli.py:4156, gateway/run.py, croniter в deps, tests/cron, plugins/cron_providers. **Рантайм ЖИВ: `~/.hermes/cron/executions.db` — задачи исполнялись 2–10 авг** |
-| **voice/wake** | жив | 8 файлов. `gateway/wake.py`, `tools/wake_word.py` ← `cli.py:12955`; Discord voice_mixer; pyproject extras: edge-tts, openwakeword, sherpa-onnx. `audio_cache/` пустая — не используется |
-| **ACP** | жив | 3 файла, 116KB. `acp_adapter/server.py` + 2 файла tracked; `from acp_adapter.edit_approval import ...` в `model_tools.py:1383`; `tests/acp/`; server.py = merge-DANGER |
-| **i18n/локали** | жив | 18 файлов, 624KB. `locales/` 17 файлов; `agent/i18n.py` + 5 импортёров (cli/run_agent/agent/gateway/hermes_cli) |
+| **cron** | ✅ выпилен | a9ff599d2 — 23 файла, ~830KB удалены. Импорты в gateway/run.py, cli.py, config.py обёрнуты try/except. Тесты вычищены (8 коммитов) |
+| **voice/wake** | ✅ выпилен | a9ff599d2 — gateway/wake.py, tools/wake_word.py, cli.py wake section удалены |
+| **ACP** | ✅ выпилен | a9ff599d2 — acp_adapter/ удалён. Импорты в model_tools.py, agent_runtime_helpers.py, auxiliary_client.py обёрнуты try/except |
+| **i18n/локали** | ✅ выпилен | a9ff599d2 — agent/i18n.py, locales/ удалены |
+| **pet** | ✅ выпилен | a9ff599d2 — agent/pet/ удалён |
 
-**Причина:** `merge-upstream.sh` охраняет удаления через diff-историю (класс MODDEL — «мы удалили, upstream изменил → git rm»), но **нет блоклиста путей**. Upstream пере-добавил файлы → для guard'а они «чистые upstream-добавления» → применились молча.
+**REMOVE_LIST** в `merge-upstream.sh` предотвращает возврат через upstream-merge. Все продакшн-импорты guarded: try/except ImportError → RuntimeError (copilot_acp_client) или fallback (cron.scheduler).
 
-**Действие:** добавить `REMOVE_LIST` в `merge-upstream.sh` (пути, которые удаляются при каждом merge). Потом решить осознанно: выпиливать снова или оставить — код завязан в cli/model_tools и работает.
-
-- [ ] Добавить `REMOVE_LIST` в `merge-upstream.sh`
-- [ ] Решить: оставить cron/voice/ACP/i18n или выпилить снова
-
-### Цена решения «оставить/выпилить»
-
-| Ветка | Файлов | Размер | Интеграция | Рантайм | Стоимость выпиливания |
-|---|---|---|---|---|---|
-| **cron** | 23 | ~830KB | глубокая: config_defaults, config.py, cli.py, gateway/run.py, croniter, plugins/cron_providers | **ЖИВ: executions.db, задачи исполнялись 2–10 авг** | Высокая — развязка cli/config/gateway + удаление плагина + остановка задач |
-| **ACP** | 3 | 116KB | model_tools.py:1383, tests/acp; server.py = merge-DANGER | нет | Средняя |
-| **i18n** | 18 | 624KB | agent/i18n.py + 5 импортёров | нет | Низкая — изолирован |
-| **voice/wake** | 8 | мал | cli.py, gateway/wake.py, Discord voice_mixer, extras | `audio_cache/` пустая | Низкая |
-
-> **Config drift: нет.** `config.yaml` — 11 секций, ни одной cron/voice/acp/locales. `_config_version: 33` — актуален.
+> **Config drift: нет.** `config.yaml` — 11 секций, ни одной cron/voice/acp/locales.
 
 ---
 
@@ -221,19 +208,19 @@
 
 | # | Действие | Эффект | Усилие | Риск | Статус |
 |---|---|---|---|---|---|
-| **1** | `REMOVE_LIST` в merge-upstream.sh → выпилить cron/voice/ACP/i18n | чинит растёкшуюся политику | среднее | средний | ✅ |
-| **2** | Закоммитить merge-upstream.sh + durability-тесты + новые модули | страховка от потери | 5 мин | нет | ✅ |
-| **3** | `packages.json` → `.gitignore` + локальная генерация | фикс установщика | 10 мин | низкий | ✅ |
-| **4** | `.gitignore`: `graphify-out/`, `.merge-tmp/`, `.hermes-setup-done`; `git rm log.txt` | чистота | 5 мин | нет | ✅ |
-| **5** | `rm .venv` (120MB без pytest); `git gc --aggressive` | -110MB диск, ~150MB история | 5 мин | нет | ✅ |
-| **6** | `tenacity` выпилить из pyproject | честные deps | 2 мин | конфликт upstream | ✅ |
-| **7** | Консолидировать atomic_write (5+ дублей) | DRY | среднее | низкий | ✅ |
-| **8** | Удалить 4 мёртвых модуля (`memory_monitor`, `stream_dispatch`, `container_boot`, `session_recap`) | мёртвый код | среднее | низкий | ✅ |
+| **1** | `REMOVE_LIST` в merge-upstream.sh → выпилить cron/voice/ACP/i18n/pet | чинит растёкшуюся политику | среднее | средний | ✅ выполнено |
+| **2** | Закоммитить merge-upstream.sh + durability-тесты + новые модули | страховка от потери | 5 мин | нет | ✅ выполнено |
+| **3** | `packages.json` → `.gitignore` + локальная генерация | фикс установщика | 10 мин | низкий | ✅ выполнено |
+| **4** | `.gitignore`: `graphify-out/`, `.merge-tmp/`, `.hermes-setup-done`; `git rm log.txt` | чистота | 5 мин | нет | ✅ выполнено |
+| **5** | `rm .venv` (120MB без pytest); `git gc --aggressive` | -110MB диск, ~150MB история | 5 мин | нет | ✅ выполнено |
+| **6** | `tenacity` выпилить из pyproject | честные deps | 2 мин | конфликт upstream | ✅ выполнено |
+| **7** | Консолидировать atomic_write (5+ дублей) | DRY | среднее | низкий | ✅ выполнено |
+| **8** | Удалить 4 мёртвых модуля (`memory_monitor`, `stream_dispatch`, `container_boot`, `session_recap`) | мёртвый код | среднее | низкий | не выполнено |
 | **9** | Split `gateway/run.py` (26K строк) — извлечён `gateway/media_helpers.py` (~250 строк). Полный split `GatewayRunner` (19K строк, 297 методов) требует venv+тесты. | поддерживаемость | большое | высокий | 🔄 |
 | **10** | Audit `except: pass` — **проверено: bare `except:` = 0, `except: pass` = 2. Не проблема.** | — | — | — | ✅ |
-| **11** | CI-проверка src↔dist синхрона для plugin dashboards | защита от дрейфа | среднее | низкий | ✅ |
-| **12** | Удалить `pets/socksy/` (3.8MB рантайм-мусор) | чистота | 1 мин | нет | ✅ |
-| **13** | `VACUUM` state.db (134MB) | компрессия | 5 мин | нет | ✅ |
+| **11** | CI-проверка src↔dist синхрона для plugin dashboards | защита от дрейфа | среднее | низкий | ✅ выполнено |
+| **12** | Удалить `pets/socksy/` (3.8MB рантайм-мусор) | чистота | 1 мин | нет | ✅ выполнено |
+| **13** | `VACUUM` state.db (134MB) | компрессия | 5 мин | нет | ✅ выполнено |
 
 ---
 

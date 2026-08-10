@@ -8363,7 +8363,10 @@ def _pet_row_frame_counts(spritesheet) -> dict:
 
 def _pet_config_scale() -> float:
     """Configured ``display.pet.scale`` (or the engine default), never raises."""
-    from agent.pet import constants
+    try:
+        from agent.pet import constants
+    except ImportError:
+        return 1.0
 
     try:
         from hermes_cli.config import load_config
@@ -8384,7 +8387,10 @@ def _pet_sprite_payload(pet, *, scale: float) -> dict:
     """
     import base64
 
-    from agent.pet import constants
+    try:
+        from agent.pet import constants
+    except ImportError:
+        return {"slug": pet.slug, "displayName": pet.display_name, "spritesheet": "", "frames": []}
 
     cache_key = _pet_payload_cache_key(pet, scale=scale)
     if cache_key is not None:
@@ -8421,7 +8427,10 @@ def _pet_sprite_payload(pet, *, scale: float) -> dict:
 
 def _pet_active_selection():
     """Resolve configured active pet + scale from config."""
-    from agent.pet import constants, store
+    try:
+        from agent.pet import constants, store
+    except ImportError:
+        return None, 1.0
 
     try:
         from hermes_cli.config import load_config
@@ -8455,9 +8464,11 @@ def _pet_state_rows(spritesheet) -> list[str]:
             row_count = max(1, image.height // constants.FRAME_H)
         return list(constants.state_rows_for_grid(row_count))
     except Exception:  # noqa: BLE001 - cosmetic, never break the surface
-        from agent.pet import constants
-
-        return list(constants.STATE_ROWS)
+        try:
+            from agent.pet import constants
+            return list(constants.STATE_ROWS)
+        except ImportError:
+            return ["idle"]
 
 
 def _pet_gen_root():
