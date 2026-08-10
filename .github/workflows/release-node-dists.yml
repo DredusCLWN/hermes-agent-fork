@@ -38,15 +38,11 @@ jobs:
         shell: bash
 
       - name: Build web (-> hermes_cli/web_dist)
-        run: |
-          npm ci --prefix web
-          npm run build --prefix web
+        run: npm run build --prefix web
         shell: bash
 
       - name: Build ui-tui
-        run: |
-          npm ci --prefix ui-tui
-          npm run build --prefix ui-tui
+        run: npm run build --prefix ui-tui
         shell: bash
 
       - name: Package dists
