@@ -5,6 +5,7 @@ import { createClientSessionState } from '@/lib/chat-runtime'
 import { $changeEventsAvailable, $cronChangeTick, $sessionsChangeTick } from '@/store/live-sync'
 import { $onBattery, batteryPollInterval } from '@/store/power'
 import { refreshActiveProfile } from '@/store/profile'
+import { refreshProjectTree } from '@/store/projects'
 import { $activeSessionId, $currentCwd, setCurrentCwd } from '@/store/session'
 import {
   $sessionStates,
@@ -240,6 +241,7 @@ export function useBackgroundSync({
     void refreshCurrentModel()
     void refreshActiveProfile()
     void refreshSessions()
+    void refreshProjectTree()
 
     // A RELATIVE workspace cwd (config `terminal.cwd: .`) renders as "." in the
     // file tree header — resolve it to the backend's absolute path once.
@@ -324,6 +326,7 @@ export function useBackgroundSync({
       lastRunAt = Date.now()
       void refreshSessions()
       void refreshMessagingSessions()
+      void refreshProjectTree()
     }
 
     const unsubscribe = $sessionsChangeTick.listen(() => {

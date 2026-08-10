@@ -304,8 +304,7 @@ def mark_exited(
 def read_prior_exit_label(profile_home: Path) -> str:
     """Container-boot helper: one-word summary of how the profile's last
     gateway life ended.  ``clean`` / ``unclean`` / ``unknown`` (no sentinel
-    or never ran).  Read-only and exception-free — used by
-    ``hermes_cli.container_boot`` to annotate ``container-boot.log``.
+    or never ran).  Read-only and exception-free.
     """
     try:
         sentinel = _read_json(get_lifecycle_sentinel_path(profile_home))

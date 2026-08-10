@@ -148,11 +148,13 @@ def _format_sessions(sessions: Sequence[dict]) -> str:
 
 
 def _format_job(job: dict, action: str) -> str:
-    from cron.jobs import effective_job_state
-
+    try:
+        from cron.jobs import effective_job_state
+        state = effective_job_state(job)
+    except ImportError:
+        state = job.get("state", "?")
     job_id = job.get("id") or job.get("job_id") or "?"
     name = job.get("name") or "(unnamed)"
-    state = effective_job_state(job)
     return f"{action} job: {name} ({job_id}) [{state}]"
 
 

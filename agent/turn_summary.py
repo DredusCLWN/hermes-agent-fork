@@ -33,6 +33,7 @@ __all__ = [
     "TurnTally",
     "format_turn_summary",
     "format_token_flow",
+    "format_token_count",
     "format_elapsed",
 ]
 
@@ -99,11 +100,20 @@ class TurnTally:
     # True once at least one edit tool reported a countable diff, so the
     # formatter knows the difference between "+0 -0" and "unknown".
     has_line_deltas: bool = False
+    # Token accounting for this turn (set by the caller from agent counters).
+    input_tokens: int = 0
+    output_tokens: int = 0
+    # Estimated tokens saved by compression/truncation/artifact store.
+    tokens_saved: int = 0
 
     @property
     def total_tools(self) -> int:
         counted = sum(sum(nouns.values()) for nouns in self.verbs.values())
         return counted + self.other_tools
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
 
 
 def _count_diff_lines(diff: str) -> tuple[int, int]:
@@ -288,7 +298,26 @@ def format_turn_summary(
         segments = segments[:max_segments] + [f"+{hidden} more"]
 
     pieces = [format_elapsed(elapsed_seconds)] + segments
+
+    # Token accounting: spent + saved
+    token_parts = []
+    if tally.total_tokens > 0:
+        token_parts.append(f"{format_token_count(tally.total_tokens)} tok")
+    if tally.tokens_saved > 0:
+        token_parts.append(f"~{format_token_count(tally.tokens_saved)} saved")
+    if token_parts:
+        pieces.append(" · ".join(token_parts))
+
     return f"{SUMMARY_PREFIX} " + " · ".join(pieces)
+
+
+def format_token_count(count: int) -> str:
+    """Format a token count compactly (1.2k / 3.4M)."""
+    if count < 1000:
+        return str(count)
+    if count < 1_000_000:
+        return f"{count / 1000:.1f}k"
+    return f"{count / 1_000_000:.1f}M"
 
 
 def format_token_flow(output_tokens: Any, *, arrow: str = "↓") -> str:

@@ -448,6 +448,7 @@ export function ModelCatalogMenu({
                         <ModelEditSubmenu
                           defaultEffort={defaultEffort}
                           effort={effEffort}
+                          efforts={caps?.efforts}
                           fastControl={fastControl}
                           isActive={isCurrent}
                           model={family.id}

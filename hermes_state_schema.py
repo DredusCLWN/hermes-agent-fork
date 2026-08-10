@@ -755,17 +755,17 @@ class SessionSchemaMixin:
                 try:
                     cursor.execute(
                         "UPDATE sessions SET model_config = json_set("
-                        "COALESCE(model_config, '{}'), '$._delegate_from', parent_session_id) "
+                        "COALESCE(NULLIF(model_config, ''), '{}'), '$._delegate_from', parent_session_id) "
                         f"WHERE parent_session_id IS NOT NULL "
-                        "AND json_extract(COALESCE(model_config, '{}'), '$._delegate_from') IS NULL "
+                        "AND json_extract(COALESCE(NULLIF(model_config, ''), '{}'), '$._delegate_from') IS NULL "
                         f"AND {_ephemeral_child_sql('sessions')}"
                     )
                     cursor.execute(
                         "UPDATE sessions SET model_config = json_set("
-                        "COALESCE(model_config, '{}'), '$._delegate_from', '__orphaned__') "
+                        "COALESCE(NULLIF(model_config, ''), '{}'), '$._delegate_from', '__orphaned__') "
                         "WHERE parent_session_id IS NULL "
-                        "AND json_extract(COALESCE(model_config, '{}'), '$._delegate_from') IS NULL "
-                        "AND json_extract(COALESCE(model_config, '{}'), '$._branched_from') IS NULL "
+                        "AND json_extract(COALESCE(NULLIF(model_config, ''), '{}'), '$._delegate_from') IS NULL "
+                        "AND json_extract(COALESCE(NULLIF(model_config, ''), '{}'), '$._branched_from') IS NULL "
                         "AND title IS NULL "
                         "AND message_count <= 25 "
                         "AND EXISTS (SELECT 1 FROM messages m "

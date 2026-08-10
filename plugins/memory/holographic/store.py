@@ -13,6 +13,8 @@ try:
 except ImportError:
     import holographic as hrr  # type: ignore[no-redef]
 
+_STORE_SCHEMA_VERSION = 2
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS facts (
     fact_id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,18 +170,74 @@ class MemoryStore:
     # ------------------------------------------------------------------
 
     def _init_db(self) -> None:
-        """Create tables, indexes, and triggers if they do not exist. Enable WAL mode."""
-        # Use the shared WAL-fallback helper so memory_store.db degrades
-        # gracefully on NFS/SMB/FUSE-mounted HERMES_HOME (same issue as
-        # state.db / kanban.db — see hermes_state._WAL_INCOMPAT_MARKERS).
+        """Create tables, indexes, and triggers if they do not exist. Enable WAL mode.
+
+        Schema versioning uses PRAGMA user_version:
+          v0 (unversioned/legacy) — base schema existed before versioning.
+          v1 — hrr_vector column added (was done via ad-hoc ALTER).
+          v2 — hrr_vector backfill for pre-existing facts that never got one.
+
+        Each migration runs inside BEGIN/COMMIT so a crash mid-migration
+        rolls back to the previous version and the store stays consistent.
+        """
         from hermes_state import apply_wal_with_fallback
         apply_wal_with_fallback(self._conn, db_label="memory_store.db (holographic)")
         self._conn.executescript(_SCHEMA)
-        # Migrate: add hrr_vector column if missing (safe for existing databases)
-        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(facts)").fetchall()}
-        if "hrr_vector" not in columns:
-            self._conn.execute("ALTER TABLE facts ADD COLUMN hrr_vector BLOB")
-        self._conn.commit()
+
+        current = self._conn.execute("PRAGMA user_version").fetchone()[0]
+
+        # v1: ensure hrr_vector column exists (replaces the old ad-hoc ALTER)
+        if current < 1:
+            self._conn.execute("BEGIN")
+            try:
+                columns = {row[1] for row in self._conn.execute("PRAGMA table_info(facts)").fetchall()}
+                if "hrr_vector" not in columns:
+                    self._conn.execute("ALTER TABLE facts ADD COLUMN hrr_vector BLOB")
+                self._conn.execute("PRAGMA user_version = 1")
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+
+        # v2: backfill hrr_vector for facts that were added before the column
+        # existed (retrieval.py:76 documents this gap: "migrated stores can
+        # have FTS candidates whose hrr_vector was never backfilled").
+        if current < 2:
+            self._conn.execute("BEGIN")
+            try:
+                if self._hrr_available:
+                    rows = self._conn.execute(
+                        "SELECT fact_id, content FROM facts WHERE hrr_vector IS NULL"
+                    ).fetchall()
+                    for row in rows:
+                        ent_rows = self._conn.execute(
+                            "SELECT e.name FROM entities e "
+                            "JOIN fact_entities fe ON fe.entity_id = e.entity_id "
+                            "WHERE fe.fact_id = ?",
+                            (row["fact_id"],),
+                        ).fetchall()
+                        entities = [r["name"] for r in ent_rows]
+                        vec = hrr.encode_fact(row["content"], entities, self.hrr_dim)
+                        self._conn.execute(
+                            "UPDATE facts SET hrr_vector = ? WHERE fact_id = ?",
+                            (hrr.phases_to_bytes(vec), row["fact_id"]),
+                        )
+                    # Rebuild banks for all categories that got backfilled
+                    if rows:
+                        cats = self._conn.execute(
+                            "SELECT DISTINCT category FROM facts WHERE hrr_vector IS NOT NULL"
+                        ).fetchall()
+                        for cat in cats:
+                            self._rebuild_bank_nocommit(cat["category"])
+                self._conn.execute("PRAGMA user_version = 2")
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+
+        # If the store is already at a future version (downgrade), accept it
+        # — forward-compatible schema means newer code can add columns that
+        # older code simply ignores.
 
     # ------------------------------------------------------------------
     # Public API
@@ -581,6 +639,40 @@ class MemoryStore:
                 (bank_name, hrr.phases_to_bytes(bank_vector), self.hrr_dim, fact_count),
             )
             self._conn.commit()
+
+    def _rebuild_bank_nocommit(self, category: str) -> None:
+        """Same as _rebuild_bank but without commit() — for use inside migration transactions."""
+        if not self._hrr_available:
+            return
+
+        bank_name = f"cat:{category}"
+        rows = self._conn.execute(
+            "SELECT hrr_vector FROM facts WHERE category = ? AND hrr_vector IS NOT NULL",
+            (category,),
+        ).fetchall()
+
+        if not rows:
+            self._conn.execute("DELETE FROM memory_banks WHERE bank_name = ?", (bank_name,))
+            return
+
+        vectors = [hrr.bytes_to_phases(row["hrr_vector"], dim=self.hrr_dim) for row in rows]
+        bank_vector = hrr.bundle(*vectors)
+        fact_count = len(vectors)
+
+        hrr.snr_estimate(self.hrr_dim, fact_count)
+
+        self._conn.execute(
+            """
+            INSERT INTO memory_banks (bank_name, vector, dim, fact_count, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(bank_name) DO UPDATE SET
+                vector = excluded.vector,
+                dim = excluded.dim,
+                fact_count = excluded.fact_count,
+                updated_at = excluded.updated_at
+            """,
+            (bank_name, hrr.phases_to_bytes(bank_vector), self.hrr_dim, fact_count),
+        )
 
     def rebuild_all_vectors(self, dim: int | None = None) -> int:
         """Recompute all HRR vectors + banks from text. For recovery/migration.

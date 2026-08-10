@@ -571,6 +571,16 @@ export function overlayRepoLanes(
       }
     }
 
+    // Remove this session from any other lane first — the backend may have
+    // placed it in a different lane than the overlay resolves, and without
+    // this dedup the row appears in two lanes simultaneously.
+    for (const g of lanes) {
+      if (g !== lane && g.sessions.some(s => s.id === session.id)) {
+        g.sessions = g.sessions.filter(s => s.id !== session.id)
+        changed = true
+      }
+    }
+
     lane.sessions = upsertSession(lane.sessions, session)
     changed = true
   }
@@ -697,7 +707,44 @@ export function overlayLiveLanes(
     return project
   }
 
-  return { ...project, repos, sessionCount: repos.reduce((n, repo) => n + repo.sessionCount, 0) }
+  // Cross-repo dedup: overlayRepoLanes runs per-repo with the full live list,
+  // so a session whose cwd matches multiple repos (e.g. nested repo roots)
+  // ends up in each. Keep it in the first repo only, then drop lanes emptied by
+  // the dedup (but preserve lanes that were already empty — they're structural).
+  const seenSessionIds = new Set<string>()
+  const emptyOnInput = new Set(
+    repos.flatMap(r => r.groups.filter(g => !g.sessions.length).map(g => g.id))
+  )
+  const dedupedRepos = repos.map(repo => {
+    if (!repo.groups.some(g => g.sessions.some(s => seenSessionIds.has(s.id)))) {
+      for (const g of repo.groups) {
+        for (const s of g.sessions) {
+          seenSessionIds.add(s.id)
+        }
+      }
+      return repo
+    }
+
+    const groups = repo.groups
+      .map(g => {
+        const sessions = g.sessions.filter(s => {
+          if (seenSessionIds.has(s.id)) {
+            return false
+          }
+          seenSessionIds.add(s.id)
+          return true
+        })
+
+        return { ...g, sessions }
+      })
+      .filter(g => g.sessions.length > 0 || emptyOnInput.has(g.id))
+
+    const sessionCount = groups.reduce((n, g) => n + g.sessions.length, 0)
+
+    return { ...repo, groups, sessionCount }
+  })
+
+  return { ...project, repos: dedupedRepos, sessionCount: dedupedRepos.reduce((n, repo) => n + repo.sessionCount, 0) }
 }
 
 /** Merge live sessions into per-project overview previews, keyed by project id. */

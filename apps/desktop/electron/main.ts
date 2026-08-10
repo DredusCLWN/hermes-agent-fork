@@ -574,8 +574,25 @@ function resolveHermesHome() {
     const legacy = path.join(app.getPath('home'), '.hermes')
 
     // Migrate transparently to LOCALAPPDATA, but honour an existing legacy
-    // ~/.hermes setup (no LOCALAPPDATA install yet) so users don't lose state.
-    if (!directoryExists(localappdata) && directoryExists(legacy)) {
+    // ~/.hermes setup so users don't lose state. The previous check
+    // (!directoryExists(localappdata)) was insufficient because the app
+    // creates %LOCALAPPDATA%\hermes for logs/caches on the very first run
+    // even when it resolves to the legacy ~/.hermes — so on the second run
+    // the directory exists (but is empty of real data) and the home flips,
+    // orphaning all sessions/projects/config. Instead, look for a real-data
+    // sentinel (state.db / projects.db / .env) in both locations: prefer
+    // whichever has data, falling back to legacy when both are empty (the
+    // first-run case where legacy was chosen but nothing was written there
+    // yet either).
+    const hasHermesData = (dir) =>
+      fileExists(path.join(dir, 'state.db')) ||
+      fileExists(path.join(dir, 'projects.db')) ||
+      fileExists(path.join(dir, '.env'))
+
+    const legacyHasData = directoryExists(legacy) && hasHermesData(legacy)
+    const localappdataHasData = directoryExists(localappdata) && hasHermesData(localappdata)
+
+    if (legacyHasData && !localappdataHasData) {
       return legacy
     }
 
@@ -10879,6 +10896,20 @@ ipcMain.handle('hermes:setting:defaultProjectDir:pick', async () => {
 })
 
 ipcMain.handle('hermes:fetchLinkTitle', (_event, url) => fetchLinkTitle(url))
+
+// Proxy fetch for external APIs (e.g. Devin) — bypasses renderer CORS
+ipcMain.handle(
+  'hermes:proxyFetch',
+  async (_event, url: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}) => {
+    const res = await fetch(url, {
+      method: options.method || 'GET',
+      headers: options.headers || {},
+      body: options.body,
+    })
+    const text = await res.text()
+    return { ok: res.ok, status: res.status, text }
+  }
+)
 
 ipcMain.handle('hermes:logs:reveal', async () => {
   try {

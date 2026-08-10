@@ -44,6 +44,7 @@ DEFAULT_KEEP_LAST_LINES = 80     # tail lines kept on truncation
 DEFAULT_ARTIFACT_STORE_ENABLED = True
 DEFAULT_ARTIFACT_TTL_DAYS = 7
 DEFAULT_ARTIFACT_MAX_GB = 1
+DEFAULT_MAX_MATCH_CHARS = 500  # per-match line cap for grep/search results
 
 # Module-level cache — populated on first call.
 # Avoids repeated config file I/O on every tool call.
@@ -100,6 +101,9 @@ def get_tool_output_limits() -> Dict[str, int]:
         "max_lines": _coerce_positive_int(section.get("max_lines"), DEFAULT_MAX_LINES),
         "max_line_length": _coerce_positive_int(
             section.get("max_line_length"), DEFAULT_MAX_LINE_LENGTH
+        ),
+        "max_match_chars": _coerce_positive_int(
+            section.get("max_match_chars"), DEFAULT_MAX_MATCH_CHARS
         ),
         "keep_first_lines": _coerce_positive_int(
             section.get("keep_first_lines"), DEFAULT_KEEP_FIRST_LINES
@@ -164,3 +168,8 @@ def get_artifact_ttl_days() -> int:
 def get_artifact_max_gb() -> int:
     """Shortcut for artifact cleanup — total size cap in GB."""
     return get_tool_output_limits()["artifact_max_gb"]
+
+
+def get_max_match_chars() -> int:
+    """Shortcut for search/grep callers — per-match line char cap."""
+    return get_tool_output_limits()["max_match_chars"]

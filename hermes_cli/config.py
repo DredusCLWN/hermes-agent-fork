@@ -903,7 +903,7 @@ def ensure_hermes_home():
         home.mkdir(parents=True, exist_ok=True)
         _secure_dir(home)
         for subdir in (
-            "cron", "sessions", "logs", "logs/curator", "memories",
+            "sessions", "logs", "logs/curator", "memories",
             "pairing", "hooks", "image_cache", "audio_cache", "skills",
         ):
             d = home / subdir
@@ -921,7 +921,7 @@ def _ensure_hermes_home_managed(home: Path):
             f"HERMES_HOME {home} does not exist. "
             "Run 'sudo nixos-rebuild switch' first."
         )
-    for subdir in ("cron", "sessions", "logs", "memories"):
+    for subdir in ("sessions", "logs", "memories"):
         d = home / subdir
         if not d.is_dir():
             raise RuntimeError(
@@ -4529,135 +4529,6 @@ def edit_config():
     subprocess.run([editor, str(config_path)])
 
 
-def _cron_model_drift_axis_for_config_key(key: str) -> Optional[str]:
-    """Return the cron drift guard axis affected by a config key, if any."""
-    normalized = str(key or "").strip().lower()
-    if normalized in {"model", "model.default", "model.model", "model.name"}:
-        return "model"
-    if normalized in {"model.provider", "provider"}:
-        return "provider"
-    return None
-
-
-def cron_model_drift_guard_enabled(
-    config: Optional[Dict[str, Any]] = None,
-) -> bool:
-    """Return whether cron must fail closed on unpinned inference drift.
-
-    Only the literal YAML boolean ``false`` disables this spend-safety guard.
-    Missing, malformed, or non-boolean values stay fail-closed. When *config*
-    is omitted, load the active merged configuration so CLI warnings honor the
-    same user/managed setting as the scheduler.
-    """
-    if config is None:
-        try:
-            config = load_config()
-        except Exception:
-            return True
-    if not isinstance(config, dict):
-        return True
-    cron_config = config.get("cron")
-    if not isinstance(cron_config, dict):
-        return True
-    return cron_config.get("model_drift_guard", True) is not False
-
-
-def _cron_fleet_default_covers_axis(
-    axis: str,
-    config: Optional[Dict[str, Any]] = None,
-) -> bool:
-    """True when cron.model / cron.model_provider covers *axis*.
-
-    An axis covered by the explicit cron-fleet default no longer follows the
-    global model/provider at fire time, so the drift guard never engages for
-    it and switch-time warnings would be false alarms.
-    """
-    if config is None:
-        try:
-            config = load_config()
-        except Exception:
-            return False
-    if not isinstance(config, dict):
-        return False
-    cron_config = config.get("cron")
-    if not isinstance(cron_config, dict):
-        return False
-    key = "model" if axis == "model" else "model_provider"
-    value = cron_config.get(key)
-    return isinstance(value, str) and bool(value.strip())
-
-
-def _load_cron_jobs_for_config_warning() -> List[Dict[str, Any]]:
-    """Best-effort read of the active profile's cron jobs database.
-
-    Delegates to ``cron.jobs.load_jobs`` to reuse its BOM handling, corruption
-    repair, and context-local store resolution (tests, embedders). Falls back
-    to an empty list on any failure so config writes never break.
-    """
-    try:
-        from cron.jobs import load_jobs
-        return load_jobs()
-    except Exception:
-        return []
-
-
-def warn_unpinned_cron_jobs_after_model_config_change(
-    key: str,
-    value: Any,
-    config: Optional[Dict[str, Any]] = None,
-) -> None:
-    """Warn when a global model/provider change will trip cron's drift guard.
-
-    Cron intentionally fails closed when an unpinned agent job's current global
-    model/provider differs from its creation-time snapshot. Surface that outcome
-    when the operator changes the global axis instead of letting the next tick
-    be the first visible signal.
-    """
-    axis = _cron_model_drift_axis_for_config_key(key)
-    if axis is None:
-        return
-    if not cron_model_drift_guard_enabled(config):
-        return
-    # A cron-fleet default covering this axis (cron.model /
-    # cron.model_provider) means unpinned jobs no longer follow the global
-    # value at all — the drift guard will not engage, so warning here would
-    # be a false alarm.
-    if _cron_fleet_default_covers_axis(axis, config):
-        return
-
-    new_value = str(value or "").strip().lower()
-    if not new_value:
-        return
-
-    pinned_field = axis
-    snapshot_field = f"{axis}_snapshot"
-    affected = 0
-    for job in _load_cron_jobs_for_config_warning():
-        if not job.get("enabled", True):
-            continue
-        if job.get("no_agent"):
-            continue
-        if str(job.get(pinned_field) or "").strip():
-            continue
-        snapshot = str(job.get(snapshot_field) or "").strip().lower()
-        if snapshot and snapshot != new_value:
-            affected += 1
-
-    if affected <= 0:
-        return
-
-    noun = "job" if affected == 1 else "jobs"
-    verb = "has" if affected == 1 else "have"
-    print(
-        f"⚠️  {affected} enabled unpinned cron {noun} {verb} stored "
-        f"{snapshot_field} values that differ from the new global {axis}. "
-        "They will fail closed on their next run instead of silently using the "
-        "changed model/provider. Inspect with `hermes cron list`, then pin the "
-        "intended values with `cronjob action=update job_id=<job_id> "
-        "provider=<provider> model=<model>`."
-    )
-
-
 def _default_value_for_key(dotted_key: str):
     """Return the leaf value declared for *dotted_key* in ``DEFAULT_CONFIG``.
 
@@ -5050,7 +4921,6 @@ def set_config_value(key: str, value: str, force: bool = False):
     else:
         _display_value = value
     print(f"✓ Set {key} = {_display_value} in {config_path}")
-    warn_unpinned_cron_jobs_after_model_config_change(key, value, user_config)
 
     # Post-write unknown-key notice (#34067): value IS saved, but tell the
     # user the runtime may never read it and suggest the likely-intended path.

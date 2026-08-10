@@ -95,7 +95,7 @@ class ToolSearchConfig:
     listing: str = "auto"  # "auto" | "on" | "off"
     # Absolute cap on the embedded listing, regardless of context size.
     # Effective budget = min(listing_max_tokens, threshold_pct% of context).
-    listing_max_tokens: int = 4000
+    listing_max_tokens: int = 3000
 
     @classmethod
     def from_raw(cls, raw: Any) -> "ToolSearchConfig":

@@ -167,7 +167,7 @@ COMMAND_REGISTRY: list[CommandDef] = [
                subcommands=("status", "pause", "resume", "clear"),
                busy_policy="dispatch"),
     CommandDef("refine", "Review this conversation now and save lessons to memory/skills", "Session",
-               args_hint="[focus instructions]"),
+               args_hint="[focus | rollback | history]", subcommands=("rollback", "history")),
     CommandDef("moa", "Run one prompt through the default Mixture of Agents preset, then restore your model", "Session",
                args_hint="<prompt>", busy_policy="reject", busy_handler="moa"),
     CommandDef("subgoal", "Add or manage extra criteria on the active goal", "Session",

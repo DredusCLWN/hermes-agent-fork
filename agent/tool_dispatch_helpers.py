@@ -50,6 +50,8 @@ _PARALLEL_SAFE_TOOLS = frozenset({
     "ha_list_services",
     "image_generate",
     "read_file",
+    "read_preview",
+    "read_terminal",
     "search_files",
     "session_search",
     "skill_view",
@@ -57,6 +59,7 @@ _PARALLEL_SAFE_TOOLS = frozenset({
     "vision_analyze",
     "web_extract",
     "web_search",
+    "x_search",
 })
 
 # Filesystem tools whose parallel admission is decided by path overlap.

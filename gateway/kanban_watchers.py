@@ -18,7 +18,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from agent.i18n import t
+def t(s: str, **kw) -> str:
+    return s.format(**kw) if kw else s
 
 # Match the logger run.py uses (logging.getLogger(__name__) where __name__ ==
 # "gateway.run") so extracted log records keep their original logger name.

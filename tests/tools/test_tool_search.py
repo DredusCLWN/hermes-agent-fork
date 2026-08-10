@@ -471,7 +471,7 @@ class TestCatalogListing:
         from tools.tool_search import ToolSearchConfig
         cfg = ToolSearchConfig.from_raw(None)
         assert cfg.listing == "auto"
-        assert cfg.listing_max_tokens == 4000
+        assert cfg.listing_max_tokens == 3000
         # legacy bool shapes keep defaults too
         assert ToolSearchConfig.from_raw(True).listing == "auto"
 

@@ -402,15 +402,22 @@ def format_aux_picker_entries(
 
 
 def _apply_capabilities(rows: list[dict]) -> None:
-    """Attach a ``{model: {fast, reasoning}}`` map to each provider row.
+    """Attach a ``{model: {fast, reasoning, efforts}}`` map to each provider row.
 
     `fast` mirrors ``model_supports_fast_mode`` (the same gate the runtime
     enforces). `reasoning` comes from the models.dev catalog when known and
     defaults to True otherwise — the effort dial is broadly accepted and a
     no-op on models that ignore it, whereas hiding it from a capable-but-
-    uncatalogued model is the worse failure.
+    uncatalogued model is the worse failure. `efforts` lists the specific
+    reasoning effort levels a model supports (e.g. ``["low","medium","high"]``
+    for GitHub o-series); an empty list means "all efforts" (the default).
     """
     from hermes_cli.models import model_supports_fast_mode
+
+    try:
+        from hermes_cli.models import github_model_reasoning_efforts
+    except Exception:
+        github_model_reasoning_efforts = None  # type: ignore[assignment]
 
     try:
         from agent.models_dev import get_model_capabilities
@@ -419,7 +426,7 @@ def _apply_capabilities(rows: list[dict]) -> None:
 
     for row in rows:
         slug = row.get("slug") or ""
-        caps: dict[str, dict[str, bool]] = {}
+        caps: dict[str, dict] = {}
 
         for model in row.get("models") or []:
             reasoning = True
@@ -431,9 +438,17 @@ def _apply_capabilities(rows: list[dict]) -> None:
                 except Exception:
                     reasoning = True
 
+            efforts: list[str] = []
+            if reasoning and github_model_reasoning_efforts is not None:
+                try:
+                    efforts = github_model_reasoning_efforts(model) or []
+                except Exception:
+                    efforts = []
+
             caps[model] = {
                 "fast": bool(model_supports_fast_mode(model)),
                 "reasoning": reasoning,
+                "efforts": efforts,
             }
 
         row["capabilities"] = caps

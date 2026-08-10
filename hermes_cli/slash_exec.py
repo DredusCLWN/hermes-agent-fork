@@ -142,7 +142,10 @@ def _exec_bundles(ctx: CommandContext) -> CommandReply:
 
 def _exec_help(ctx: CommandContext) -> CommandReply:
     """Core gateway /help body (pre platform mention decoration)."""
-    from agent.i18n import t
+    try:
+        from agent.i18n import t
+    except ImportError:
+        def t(s, **kw): return s.format(**kw) if kw else s
     from hermes_cli.commands import gateway_help_lines
 
     lines = [
@@ -171,7 +174,10 @@ def _exec_commands(ctx: CommandContext) -> CommandReply:
     ``ctx.options["page_size"]`` is a surface parameter (Telegram uses 15,
     everything else 20) — for a fixed context the text is surface-invariant.
     """
-    from agent.i18n import t
+    try:
+        from agent.i18n import t
+    except ImportError:
+        def t(s, **kw): return s.format(**kw) if kw else s
     from hermes_cli.commands import gateway_help_lines
 
     raw_args = (ctx.args or "").strip()

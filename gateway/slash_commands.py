@@ -30,7 +30,9 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from agent.account_usage import fetch_account_usage, render_account_usage_lines
-from agent.i18n import t
+
+def t(s: str, **kw) -> str:
+    return s.format(**kw) if kw else s
 from agent.turn_context import extract_api_content_sidecar
 from gateway.config import HomeChannel, Platform, PlatformConfig, persist_home_channel
 from gateway.platforms.base import EphemeralReply, MessageEvent, MessageType

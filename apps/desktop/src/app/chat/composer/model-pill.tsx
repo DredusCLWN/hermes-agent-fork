@@ -145,9 +145,9 @@ export function ModelPill({
   const pillClass = compact
     ? cn(
         'size-(--composer-control-size) shrink-0 justify-center gap-0 rounded-md p-0',
-        'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'
+        'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground',
       )
-    : PILL
+    : cn(PILL)
 
   const baseTitle = currentProvider
     ? copy.modelTitle(currentProvider, currentModel || copy.modelNone)

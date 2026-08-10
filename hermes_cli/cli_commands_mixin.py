@@ -2128,12 +2128,42 @@ class CLICommandsMixin:
         optional focus instructions. Writes go to the memory + skill stores
         in a background fork; the live conversation and prompt cache are
         never touched.
+
+        Subcommands:
+          /refine [focus]     — run the review with optional focus instructions
+          /refine rollback    — restore files from the most recent refine snapshot
+          /refine history     — list available refine snapshots
         """
         from cli import _DIM, _RST, _cprint
 
         parts = (cmd or "").strip().split(None, 1)
-        focus = parts[1].strip() if len(parts) > 1 else ""
+        arg = parts[1].strip() if len(parts) > 1 else ""
 
+        # /refine rollback — restore files from the latest snapshot
+        if arg.lower() == "rollback":
+            from agent.refine_snapshot import rollback_latest
+            result = rollback_latest()
+            if result is None:
+                _cprint(f"  {_DIM}No refine snapshots available to roll back.{_RST}")
+            else:
+                count = len(result.get("restored", []))
+                _cprint(f"  ↩ Rolled back {count} file(s) from the last /refine.")
+            return
+
+        # /refine history — list snapshots
+        if arg.lower() in ("history", "snapshots"):
+            from agent.refine_snapshot import list_snapshots
+            snaps = list_snapshots()
+            if not snaps:
+                _cprint(f"  {_DIM}No refine snapshots yet.{_RST}")
+            else:
+                for s in snaps:
+                    ts = s.get("timestamp", 0)
+                    n = len(s.get("files", []))
+                    _cprint(f"  {_DIM}{ts:.0f}{_RST} — {n} file(s)")
+            return
+
+        focus = arg
         agent = getattr(self, "agent", None)
         if agent is None:
             _cprint(f"  {_DIM}Nothing to refine yet — send a message first.{_RST}")
@@ -2143,6 +2173,23 @@ class CLICommandsMixin:
         if not snapshot:
             _cprint(f"  {_DIM}Nothing to refine yet — the conversation is empty.{_RST}")
             return
+
+        # Capture pre-refine snapshot of skills + memory for rollback
+        try:
+            from agent.refine_snapshot import capture_pre_refine_snapshot
+            from hermes_constants import get_hermes_home
+            _home = get_hermes_home()
+            _skill_paths = []
+            _skills_dir = _home / "skills"
+            if _skills_dir.exists():
+                _skill_paths = list(_skills_dir.rglob("SKILL.md"))
+            _memory_paths = [_home / "MEMORY.md", _home / "USER.md"]
+            capture_pre_refine_snapshot(
+                skill_paths=_skill_paths,
+                memory_paths=_memory_paths,
+            )
+        except Exception:
+            pass  # snapshot is best-effort; refine should still run
 
         review_skills = "skill_manage" in getattr(agent, "valid_tool_names", set())
         try:
@@ -2158,7 +2205,8 @@ class CLICommandsMixin:
         tail = f" (focus: {focus})" if focus else ""
         _cprint(
             f"  ⚗ Reviewing this conversation in the background{tail} — "
-            f"any memory/skill updates will be reported when done."
+            f"any memory/skill updates will be reported when done. "
+            f"Use /refine rollback to undo."
         )
 
     def _handle_goal_command(self, cmd: str) -> None:

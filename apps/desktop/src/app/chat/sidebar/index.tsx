@@ -1433,7 +1433,7 @@ export function ChatSidebar({
                     ) : undefined
                   ) : undefined
                 }
-                liveSessions={inProject ? agentSessions : undefined}
+                liveSessions={undefined}
                 manualOrderIds={agentOrderManual ? agentOrderIds : undefined}
                 onArchiveSession={onArchiveSession}
                 onBranchSession={onBranchSession}

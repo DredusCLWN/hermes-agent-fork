@@ -103,8 +103,8 @@ export function ChatBar({
       const draft = await runComposerMiddleware({ text: value, attachments: options?.attachments })
 
       if (!draft) {
-        return false
-      }
+              return false
+            }
 
       return onSubmitProp(draft.text, { ...options, attachments: draft.attachments })
     },

@@ -27,7 +27,7 @@ from typing import Callable, Dict, List, Optional, Set
 logger = logging.getLogger(__name__)
 
 # Cap on a tool error body; only trims runaway interpolated exceptions (static msgs are ~115 chars).
-_MAX_TOOL_ERROR_CHARS = 2048
+_MAX_TOOL_ERROR_CHARS = 1536
 _TOOL_ERROR_TRUNCATION_MARKER = "… [truncated]"
 # Logs keep more of the body than the model sees, but still a bounded amount.
 _MAX_LOGGED_ERROR_CHARS = 8192

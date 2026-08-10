@@ -291,8 +291,8 @@ TOOLSETS = {
     },
     
     "delegation": {
-        "description": "Spawn subagents with isolated context for complex subtasks",
-        "tools": ["delegate_task"],
+        "description": "Spawn subagents with isolated context for complex subtasks and exchange messages between live agent sessions",
+        "tools": ["delegate_task", "agent_message_send", "agent_message_list"],
         "includes": []
     },
 

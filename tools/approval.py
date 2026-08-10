@@ -2804,7 +2804,10 @@ def _prompt_dangerous_approval_inner(command: str, description: str,
     try:
         # Resolve the active UI language once per prompt so we don't re-read
         # config/YAML inside the retry loop below.
-        from agent.i18n import t
+        try:
+            from agent.i18n import t
+        except ImportError:
+            def t(s, **kw): return s.format(**kw) if kw else s
         while True:
             print()
             print(f"  {t('approval.dangerous_header', description=display_description)}")

@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from utils import atomic_write_text
+
 logger = logging.getLogger(__name__)
 
 ACCESS_TOKEN_PREFIX = "hch-at-"
@@ -444,17 +446,8 @@ def _read_config(path: Path) -> dict[str, Any]:
 
 def _atomic_write_config(path: Path, raw: dict[str, Any]) -> None:
     """Write ``raw`` to ``path`` atomically, preserving 0600 on the new file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.tmp")
     text = json.dumps(raw, indent=2) + "\n"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-    except Exception:
-        tmp.unlink(missing_ok=True)
-        raise
-    os.replace(tmp, path)
+    atomic_write_text(path, text, create_mode=0o600)
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:

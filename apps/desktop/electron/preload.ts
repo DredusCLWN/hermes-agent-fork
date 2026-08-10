@@ -141,6 +141,8 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   openExternal: url => ipcRenderer.invoke('hermes:openExternal', url),
   openPreviewInBrowser: url => ipcRenderer.invoke('hermes:openPreviewInBrowser', url),
   fetchLinkTitle: url => ipcRenderer.invoke('hermes:fetchLinkTitle', url),
+  proxyFetch: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) =>
+    ipcRenderer.invoke('hermes:proxyFetch', url, options),
   sanitizeWorkspaceCwd: cwd => ipcRenderer.invoke('hermes:workspace:sanitize', cwd),
   settings: {
     getDefaultProjectDir: () => ipcRenderer.invoke('hermes:setting:defaultProjectDir:get'),

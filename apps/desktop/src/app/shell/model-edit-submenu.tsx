@@ -11,6 +11,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { useI18n } from '@/i18n'
 import { isThinkingEnabled, REASONING_EFFORTS, resolveReasoningEffort } from '@/lib/reasoning-effort'
+import { normalize } from '@/lib/text'
 
 // Hermes' real reasoning levels live in lib/reasoning-effort; `none` is owned
 // by the Thinking toggle, not the radio.
@@ -82,6 +83,8 @@ interface ModelEditSubmenuProps {
   provider: string
   /** Whether this model supports reasoning effort. */
   reasoning: boolean
+  /** Specific effort levels this model supports. Empty/missing = all efforts. */
+  efforts?: string[]
 }
 
 export function ModelEditSubmenu(props: ModelEditSubmenuProps) {
@@ -100,6 +103,7 @@ export function ModelEditSubmenu(props: ModelEditSubmenuProps) {
 function ModelEditSubmenuBody({
   defaultEffort,
   effort,
+  efforts,
   fastControl,
   isActive,
   onSelectModel,
@@ -111,6 +115,10 @@ function ModelEditSubmenuBody({
 
   const effortValue = resolveReasoningEffort(effort, defaultEffort)
   const thinkingOn = isThinkingEnabled(effort, defaultEffort)
+
+  const availableEfforts = efforts && efforts.length > 0
+    ? REASONING_EFFORTS.filter(value => efforts.some(e => normalize(e) === value))
+    : REASONING_EFFORTS
 
   const setFast = (enabled: boolean) => {
     if (fastControl.kind === 'variant') {
@@ -161,7 +169,7 @@ function ModelEditSubmenuBody({
           <DropdownMenuSeparator className="mx-0" />
           <DropdownMenuLabel className={dropdownMenuSectionLabel}>{copy.effort}</DropdownMenuLabel>
           <DropdownMenuRadioGroup onValueChange={value => onSetOptions({ effort: value })} value={effortValue}>
-            {REASONING_EFFORTS.map(value => (
+            {availableEfforts.map(value => (
               <DropdownMenuRadioItem
                 className={dropdownMenuRow}
                 key={value}

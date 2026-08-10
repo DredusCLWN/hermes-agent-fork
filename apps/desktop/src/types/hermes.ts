@@ -448,6 +448,9 @@ export interface ModelOptionProvider {
 export interface ModelCapabilities {
   fast: boolean
   reasoning: boolean
+  /** Specific reasoning effort levels this model supports (e.g. ["low","medium","high"]).
+   *  Empty/missing means "all efforts" — the UI shows the full list. */
+  efforts?: string[]
 }
 
 export interface ModelOptionsResponse {

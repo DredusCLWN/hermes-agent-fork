@@ -2613,11 +2613,16 @@ def terminal_tool(
         # hermes_cli/gateway.py and the cron-path guard in hermes_cli/cron.py,
         # but applies unconditionally (force=True cannot help here).
         if os.environ.get("_HERMES_GATEWAY") == "1":
-            from cron.lifecycle_guard import (
-                _MAX_REFERENCED_SCRIPT_BYTES,
-                contains_gateway_lifecycle_command_or_referenced_script,
-                contains_launchctl_submit_command,
-            )
+            try:
+                from cron.lifecycle_guard import (
+                    _MAX_REFERENCED_SCRIPT_BYTES,
+                    contains_gateway_lifecycle_command_or_referenced_script,
+                    contains_launchctl_submit_command,
+                )
+            except ImportError:
+                _MAX_REFERENCED_SCRIPT_BYTES = 8192
+                contains_gateway_lifecycle_command_or_referenced_script = lambda *a, **kw: False
+                contains_launchctl_submit_command = lambda *a, **kw: False
             if contains_launchctl_submit_command(command):
                 return json.dumps({
                     "output": "",
@@ -3293,6 +3298,8 @@ def terminal_tool(
                         f"out of {len(output)} total] ...\n\n"
                     )
                     output = output[:head_chars] + truncated_notice + output[-tail_chars:]
+                    if _artifact_path:
+                        output += f"\n\n[Full output saved to: {_artifact_path}]"
 
             # Strip ANSI escape sequences so the model never sees terminal
             # formatting — prevents it from copying escapes into file writes.

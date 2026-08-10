@@ -2681,6 +2681,8 @@ class ShellFileOperations(FileOperations):
             # rg group seps:    "--"
             # Note: on Windows, paths contain drive letters (e.g. C:\path),
             # so naive split(":") breaks. Use regex to handle both platforms.
+            from tools.tool_output_limits import get_max_match_chars
+            _match_cap = get_max_match_chars()
             _match_re = re.compile(r'^([A-Za-z]:)?(.*?):(\d+):(.*)$')
             matches = []
             for line in stdout.strip().split('\n'):
@@ -2693,7 +2695,7 @@ class ShellFileOperations(FileOperations):
                     matches.append(SearchMatch(
                         path=(m.group(1) or '') + m.group(2),
                         line_number=int(m.group(3)),
-                        content=m.group(4)[:500]
+                        content=m.group(4)[:_match_cap]
                     ))
                     continue
                 
@@ -2705,7 +2707,7 @@ class ShellFileOperations(FileOperations):
                         matches.append(SearchMatch(
                             path=parsed[0],
                             line_number=parsed[1],
-                            content=parsed[2][:500]
+                            content=parsed[2][:_match_cap]
                         ))
             
             total = len(matches)
@@ -2807,6 +2809,8 @@ class ShellFileOperations(FileOperations):
             # grep group seps:    "--"
             # Note: on Windows, paths contain drive letters (e.g. C:\path),
             # so naive split(":") breaks. Use regex to handle both platforms.
+            from tools.tool_output_limits import get_max_match_chars
+            _match_cap = get_max_match_chars()
             _match_re = re.compile(r'^([A-Za-z]:)?(.*?):(\d+):(.*)$')
             matches = []
             for line in stdout.strip().split('\n'):
@@ -2818,7 +2822,7 @@ class ShellFileOperations(FileOperations):
                     matches.append(SearchMatch(
                         path=(m.group(1) or '') + m.group(2),
                         line_number=int(m.group(3)),
-                        content=m.group(4)[:500]
+                        content=m.group(4)[:_match_cap]
                     ))
                     continue
                 
@@ -2828,7 +2832,7 @@ class ShellFileOperations(FileOperations):
                         matches.append(SearchMatch(
                             path=parsed[0],
                             line_number=parsed[1],
-                            content=parsed[2][:500]
+                            content=parsed[2][:_match_cap]
                         ))
 
             

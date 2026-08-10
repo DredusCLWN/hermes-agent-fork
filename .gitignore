@@ -197,3 +197,10 @@ native/fts5_cjk/*.so
 # interrupted; consumed by launch-time recovery. Never commit it (was tracked
 # by accident via 3a69e34702, removed in the #72002 salvage).
 .lazy-refresh-incomplete
+
+# Audit cleanup 2026-08-10
+graphify-out/
+.merge-tmp/
+.hermes-setup-done
+packages.json
+log.txt
