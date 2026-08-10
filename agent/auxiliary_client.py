@@ -6398,7 +6398,13 @@ def resolve_provider_client(
                     "process credentials are incomplete"
                 )
                 return None, None
-            from agent.copilot_acp_client import CopilotACPClient
+            try:
+                from agent.copilot_acp_client import CopilotACPClient
+            except ImportError:
+                raise RuntimeError(
+                    "copilot-acp provider requires agent.copilot_acp_client, "
+                    "which was removed in this fork"
+                ) from None
 
             client = CopilotACPClient(
                 api_key=api_key,
