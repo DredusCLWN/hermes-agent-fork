@@ -79,8 +79,8 @@ environments/benchmarks/evals/
 hermes_cli/web_dist/
 # Cross-process web UI build lock (flock target, always empty)
 .web_ui_build.lock
-apps/desktop/build/
-apps/desktop/dist/
+# apps/desktop/build/ — needed for build (install-stamp.json)
+# apps/desktop/dist/ — needed for desktop runtime
 
 # tsc-emitted artifacts (a stray `tsc -b` compiles into src/, and vite then
 # resolves the stale .js OVER the .tsx — never track these)
@@ -92,6 +92,7 @@ apps/desktop/src/**/*.d.ts
 apps/shared/src/**/*.js
 apps/shared/src/**/*.js.map
 apps/shared/src/**/*.d.ts
+# apps/desktop/release/ — exe/msi published via GitHub Releases (exceed 100MB git limit)
 apps/desktop/release/
 *.tsbuildinfo
 
