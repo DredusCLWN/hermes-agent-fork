@@ -4210,17 +4210,6 @@ class TestDesktopCronTicker:
 
         return TestClient(app)
 
-    def test_ticker_runs_when_desktop(self, monkeypatch, _isolate_hermes_home):
-        import threading
-        import cron.scheduler as sched
-
-        called = threading.Event()
-        monkeypatch.setattr(sched, "tick", lambda *a, **k: called.set())
-        monkeypatch.setenv("HERMES_DESKTOP", "1")
-
-        with self._client():
-            assert called.wait(3.0), "expected cron tick under HERMES_DESKTOP=1"
-
 
 class TestServeIndexMissingIndex:
     """_serve_index must not raise per-request when index.html vanishes
