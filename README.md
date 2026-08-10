@@ -16,13 +16,13 @@
 
 ## Что это
 
-Форк [Hermes Agent](https://github.com/NousResearch/hermes-agent) — self-improving AI агента от Nous Research. Форк поддерживает upstream-синхронизацию через `scripts/merge-upstream.sh` и избирательно удаляет модули, которые не нужны в данной конфигурации.
+Форк [Hermes Agent](https://github.com/NousResearch/hermes-agent) — self-improving AI агента от Nous Research. **Не официальный релиз, не поддерживается Nous Research.** Ставьте на свой риск. Форк поддерживает upstream-синхронизацию через `scripts/merge-upstream.sh` и избирательно удаляет модули, которые не нужны в данной конфигурации.
 
 ### Что изменено
 
 - **Удалены мёртвые модули** (~29K строк): `cron`, `voice/wake`, `ACP adapter`, `i18n/locales`, `pet`. Все продакшн-импорты guarded (`try/except ImportError`).
 - **Fork installer** (`fork-install.ps1`) — wrapper поверх канонического `scripts/install.ps1`: клонирует форк по тегу, передаёт управление оригинальному установщику, добавляет `.env` template и desktop shortcut.
-- **`release-node-dists.yml`** — CI workflow: при push тега `v*` собирает JS-dist (web/, ui-tui/) и крепит к GitHub Release. Установка без Node.js — быстрый путь.
+- **`release-node-dists.yml`** — CI workflow: при push тега `v*` собирает JS-dist (web/, ui-tui/) и крепит к GitHub Release. Ассеты готовы для будущего no-Node fast-path (пока установщик сам бутстрапит Node и собирает из исходников).
 - **Durability-тесты** — 20 тестов покрытия crash-safety: SessionDB, holographic store, memory_tool, active_sessions.
 - **Версионирование holographic store** — `PRAGMA user_version`, транзакционные миграции v1/v2, `hrr_vector` backfill.
 - **Улучшения memory system** — CacheAligner, effort routing, failure mining, provenance tracking через `threading.local`, Jaccard dedup, secret scrubbing.
@@ -77,20 +77,19 @@ powershell -ExecutionPolicy Bypass -File fork-install.ps1 -NoShortcut
 
 ### Linux, macOS, WSL2
 
-Используется канонический установщик upstream:
-
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+# Клонировать форк по тегу
+git clone --depth 1 --branch v2026.8.10 https://github.com/DredusCLWN/hermes-agent-fork ~/hermes-agent
+cd ~/hermes-agent
+
+# Venv вне исходников
+uv venv ~/.hermes/venvs/hermes-dev --python 3.11
+source ~/.hermes/venvs/hermes-dev/bin/activate
+
+uv pip install -e ".[all,dev]"
 ```
 
-Затем переключите remote на форк:
-
-```bash
-cd "${HERMES_HOME:-$HOME/.hermes}/hermes-agent"
-git remote set-url origin https://github.com/DredusCLWN/hermes-agent-fork
-git fetch --tags
-git checkout v2026.8.10
-```
+> ⚠️ Не используйте `curl install.sh | bash` + `git remote set-url` — это ломает `hermes update` (detached HEAD на теге, origin переписан). Клонируйте форк напрямую.
 
 ### После установки
 
@@ -140,10 +139,16 @@ hermes doctor       # Диагностика проблем
 
 ## Провайдеры
 
-Hermes работает с любым провайдером — [Nous Portal](https://portal.nousresearch.com), OpenRouter, OpenAI, Anthropic, DeepSeek, своим endpoint. Переключение: `hermes model` — без смены кода.
+Hermes работает с любым провайдером — OpenRouter, OpenAI, Anthropic, DeepSeek, своим endpoint, или [Nous Portal](https://portal.nousresearch.com). Переключение: `hermes model` — без смены кода.
 
 ```bash
-hermes setup --portal    # Nous Portal: 300+ моделей + Tool Gateway
+hermes model              # Интерактивный выбор провайдера и модели
+# Примеры:
+#   DeepSeek (free/дешёвые модели)
+#   OpenRouter (агрегатор, 100+ провайдеров)
+#   Свой endpoint (OpenAI-совместимый API)
+
+hermes setup --portal    # Nous Portal: 300+ моделей + Tool Gateway (опционально)
 ```
 
 ---
