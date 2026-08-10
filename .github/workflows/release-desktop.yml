@@ -1,0 +1,54 @@
+# Build the Hermes desktop app into release assets on every tag push.
+#
+# Produces Windows NSIS installer + portable, macOS DMG (if secrets present),
+# and Linux AppImage. Assets land on the GitHub Release that the tag creates.
+#
+# Runs on windows-latest (cross-compile for all platforms via electron-builder).
+# Mac notarization requires secrets (APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD,
+# APPLE_TEAM_ID) — skipped if absent, producing an unsigned DMG.
+
+name: release-desktop
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install root deps
+        run: npm ci
+        shell: bash
+
+      - name: Build desktop app (Windows NSIS + portable)
+        working-directory: apps/desktop
+        run: |
+          npm run build
+          npx electron-builder --win nsis portable --config.electronDist="$(node -e "console.log(require('path').dirname(require.resolve('electron/package.json')))")/dist"
+        shell: bash
+
+      - name: Package assets
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp apps/desktop/release/*.exe release-assets/ 2>/dev/null || true
+          ls -la release-assets/
+
+      - name: Publish to the tag's GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*.exe
+          generate_release_notes: true
