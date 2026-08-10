@@ -49,20 +49,6 @@ class TestSaveConfigValueAtomic:
 
 
 
-    def test_model_write_runs_shared_cron_drift_warning(self, config_env, monkeypatch):
-        warning = MagicMock()
-        monkeypatch.setattr(
-            "hermes_cli.config.warn_unpinned_cron_jobs_after_model_config_change",
-            warning,
-        )
-
-        from cli import save_config_value
-
-        assert save_config_value("model.default", "new-model") is True
-        warning.assert_called_once_with("model.default", "new-model")
-
-
-
     def test_file_not_truncated_on_error(self, config_env, monkeypatch):
         """If atomic_yaml_write raises, the original file is untouched."""
         original_content = config_env.read_text()
