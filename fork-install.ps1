@@ -17,7 +17,7 @@
 
 param(
     [string]$Tag = "v2026.8.10",
-    [string]$RepoUrl = "https://github.com/Idel/hermes-agent.git",
+    [string]$RepoUrl = "https://github.com/DredusCLWN/hermes-agent-fork",
     [string]$HermesHome = "",
     [switch]$SkipSetup,
     [switch]$IncludeDesktop,
