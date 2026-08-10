@@ -1,0 +1,7 @@
+name: web-scrapling
+version: 1.0.0
+description: "Scrapling web content extraction — no API key required. Anti-bot bypass (Cloudflare, TLS fingerprint), clean markdown output. Install with `pip install scrapling`."
+author: DredusCLWN
+kind: backend
+provides_web_providers:
+  - scrapling

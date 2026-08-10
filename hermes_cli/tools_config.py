@@ -1644,6 +1644,28 @@ def _run_post_setup(post_setup_key: str):
         _print_info("    No API key required. DuckDuckGo enforces server-side rate limits.")
         _print_info("    Pair with an extract provider if you also need web_extract.")
 
+    elif post_setup_key == "scrapling":
+        try:
+            __import__("scrapling")
+            _print_success("    scrapling is already installed")
+        except ImportError:
+            _print_info("    Installing scrapling (anti-bot web extraction)...")
+            try:
+                result = _pip_install(["-U", "scrapling", "--quiet"], timeout=300)
+                if result.returncode == 0:
+                    _print_success("    scrapling installed")
+                else:
+                    _print_warning("    scrapling install failed:")
+                    _print_info(f"      {(result.stderr or '').strip()[:300]}")
+                    _print_info("    Run manually: uv pip install -U scrapling")
+                    return
+            except subprocess.TimeoutExpired:
+                _print_warning("    scrapling install timed out (>5min)")
+                _print_info("    Run manually: uv pip install -U scrapling")
+                return
+        _print_info("    No API key required. Bypasses Cloudflare, renders JS, returns clean text.")
+        _print_info("    Pair with ddgs or brave_free for search.")
+
     elif post_setup_key == "spotify":
         # Run the full `hermes auth spotify` flow — if the user has no
         # client_id yet, this drops them into the interactive wizard
@@ -2968,6 +2990,7 @@ _POST_SETUP_READY: dict = {
     "piper": lambda: _module_installed("piper"),
     "faster_whisper": lambda: _module_installed("faster_whisper"),
     "ddgs": lambda: _module_installed("ddgs"),
+    "scrapling": lambda: _module_installed("scrapling"),
     "langfuse": lambda: _module_installed("langfuse"),
     "agent_browser": lambda: _agent_browser_installed(),
     "browserbase": lambda: _cloud_agent_browser_installed(),
