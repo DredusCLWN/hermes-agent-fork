@@ -839,7 +839,7 @@ class CLICommandsMixin:
             relay_fronts = False
             try:
                 from gateway.relay import relay_platform_identities
-                relay_cfg = gw_config.platforms.get(Platform.RELAY)
+                relay_cfg = gw_config.platforms.get()
                 if relay_cfg and relay_cfg.enabled:
                     fronted = {p for p, _ in relay_platform_identities()}
                     relay_fronts = platform_name in fronted

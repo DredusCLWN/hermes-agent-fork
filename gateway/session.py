@@ -90,10 +90,6 @@ from .config import (
     SessionResetPolicy,  # noqa: F401 — re-exported via gateway/__init__.py
     HomeChannel,
 )
-from .whatsapp_identity import (
-    canonical_whatsapp_identifier,
-    normalize_whatsapp_identifier,  # noqa: F401 - re-exported for gateway.session callers
-)
 from utils import atomic_replace
 from agent.turn_context import extract_api_content_sidecar
 
@@ -346,15 +342,9 @@ class SessionContext:
         }
 
 
-_PII_SAFE_PLATFORMS = frozenset({
-    Platform.WHATSAPP,
-    Platform.SIGNAL,
-    Platform.TELEGRAM,
-    Platform.BLUEBUBBLES,
-})
+_PII_SAFE_PLATFORMS = frozenset()
 """Platforms where user IDs can be safely redacted (no in-message mention system
-that requires raw IDs).  Discord is excluded because mentions use ``<@user_id>``
-and the LLM needs the real ID to tag users."""
+that requires raw IDs)."""
 
 
 def _slack_tools_loaded() -> bool:
@@ -411,33 +401,6 @@ def _slack_tools_loaded() -> bool:
         # 'slack' toolset.
         enabled = _get_platform_tools(cfg, "slack")
         return "slack" in enabled
-    except Exception:
-        return False
-
-
-def _discord_tools_loaded() -> bool:
-    """True iff the agent will actually have Discord tools this session.
-
-    Two conditions must hold:
-      1. The `discord` or `discord_admin` toolset is enabled for the
-         Discord platform via `hermes tools` (opt-in, default OFF).
-      2. `DISCORD_BOT_TOKEN` is set — the tool's `check_fn` gates on it
-         at registry time, so the toolset being enabled in config is not
-         enough if the token isn't configured.
-
-    Returns False (safe default — keeps the stale-API disclaimer) on any
-    error so a bad config can't silently promise tools the agent lacks.
-    """
-    try:
-        from agent.secret_scope import get_secret
-        from hermes_cli.config import load_config
-        from hermes_cli.tools_config import _get_platform_tools
-
-        if not (get_secret("DISCORD_BOT_TOKEN", "") or "").strip():
-            return False
-        cfg = load_config()
-        enabled = _get_platform_tools(cfg, "discord", include_default_mcp_servers=False)
-        return "discord" in enabled or "discord_admin" in enabled
     except Exception:
         return False
 
@@ -551,22 +514,6 @@ def build_session_context_prompt(
             f"**Channel Topic:** {_format_untrusted_prompt_value(context.source.chat_topic)}"
         )
 
-    if context.source.platform == Platform.MATRIX:
-        src = context.source
-        room_name = src.chat_name or src.chat_id
-        room_id = _hash_chat_id(src.chat_id) if redact_pii else src.chat_id
-        lines.append("")
-        lines.append(f"**Matrix Room:** {_format_untrusted_prompt_value(room_name)}")
-        lines.append(f"**Matrix Room ID:** {room_id}")
-        if src.thread_id:
-            thread_id = _hash_chat_id(src.thread_id) if redact_pii else src.thread_id
-            lines.append(f"**Matrix Thread:** {thread_id}")
-        lines.append(
-            "**Matrix room boundary:** Treat this turn as scoped to the current "
-            "Matrix room/thread only. Do not assume unresolved references are "
-            "about other Matrix rooms or projects unless the user explicitly says so."
-        )
-
     # User identity.
     # In shared multi-user sessions (shared threads OR shared non-thread groups
     # when group_sessions_per_user=False), multiple users contribute to the same
@@ -589,110 +536,6 @@ def build_session_context_prompt(
         if redact_pii:
             uid = _hash_sender_id(uid)
         lines.append(f"**User ID:** {_format_untrusted_prompt_value(uid)}")
-
-    # Platform-specific behavioral notes
-    if context.source.platform == Platform.SLACK:
-        # Inject the Slack capability note only when the agent actually has
-        # Slack tools loaded this session — native `slack` toolset opt-in,
-        # or a connected MCP server that has registered Slack tools.
-        # Otherwise keep the stale-API disclaimer honest so we never
-        # promise tools the agent lacks. Mirrors the Discord pattern below.
-        if _slack_tools_loaded():
-            lines.append("")
-            lines.append(
-                "**Platform notes:** You are running inside Slack and have access "
-                "to Slack-specific tools this session. Consult the available Slack "
-                "tool schemas for the exact operations supported (e.g. channel "
-                "history and thread lookups, posting, reactions) — use those tools "
-                "for Slack-specific requests, and do not promise Slack actions "
-                "beyond what the loaded tools actually expose."
-            )
-        else:
-            lines.append("")
-            lines.append(
-                "**Platform notes:** You are running inside Slack. "
-                "You do NOT have access to Slack-specific APIs — you cannot search "
-                "channel history, pin/unpin messages, manage channels, or list users. "
-                "Do not promise to perform these actions. The gateway may inline the "
-                "current message's Slack block/attachment payload when available, but "
-                "you still cannot call Slack APIs yourself."
-            )
-        if context.shared_multi_user_session:
-            lines.append(
-                "In shared Slack threads, use the current turn's sender prefix "
-                "as the only verified current-author mention target. Do not "
-                "guess or reuse `<@U...>` mentions from names, memory, or prior "
-                "conversation history."
-            )
-    elif context.source.platform == Platform.DISCORD:
-        # Inject the Discord IDs block only when the agent actually has
-        # Discord tools loaded this session — i.e. the user opted into
-        # `discord` / `discord_admin` via `hermes tools` AND the bot
-        # token is configured.  Otherwise keep the stale-API disclaimer
-        # honest so we never promise tools the agent lacks.
-        if _discord_tools_loaded():
-            src = context.source
-            id_lines = ["", "**Discord IDs (for the `discord` / `discord_admin` tools):**"]
-            if src.guild_id:
-                id_lines.append(f"  - Guild: `{src.guild_id}`")
-            if src.thread_id and src.parent_chat_id:
-                id_lines.append(f"  - Parent channel: `{src.parent_chat_id}`")
-                id_lines.append(f"  - Thread: `{src.thread_id}` (use as `channel_id` for fetch_messages etc.)")
-            else:
-                id_lines.append(f"  - Channel: `{src.chat_id}`")
-            if src.message_id:
-                # The triggering message id is volatile (changes every turn).
-                # Keep it OUT of this cached system-prompt block — including it
-                # here changes build_session_context_prompt() output per turn,
-                # which busts the gateway agent-cache signature and forces an
-                # AIAgent rebuild on every Discord message. The actual id is
-                # injected per-turn into the user message instead (see the
-                # "Triggering message id" note in run.py).
-                id_lines.append(
-                    "  - Triggering message: provided per-turn in the incoming "
-                    "user message (use it as `message_id` for reply/react/pin)"
-                )
-            lines.extend(id_lines)
-        else:
-            lines.append("")
-            lines.append(
-                "**Platform notes:** You are running inside Discord. "
-                "You do NOT have access to Discord-specific APIs — you cannot search "
-                "channel history, pin messages, manage roles, or list server members. "
-                "Do not promise to perform these actions. If the user asks, explain "
-                "that you can only read messages sent directly to you and respond."
-            )
-        # Static (never per-turn): live voice-channel state used to be
-        # appended here and changed bytes every turn the bot sat in a voice
-        # channel, busting the prompt cache.  It now arrives on the current
-        # user message as a `[Voice channel now: ...]` note, injected only
-        # when it actually changed.
-        lines.append("")
-        lines.append(
-            "Voice-channel state, when relevant, appears in the current "
-            "message as a `[Voice channel now: ...]` note."
-        )
-    elif context.source.platform == Platform.BLUEBUBBLES:
-        lines.append("")
-        lines.append(
-            "**Platform notes:** You are responding via iMessage. "
-            "Keep responses short and conversational — think texts, not essays. "
-            "Structure longer replies as separate short thoughts, each separated "
-            "by a blank line (double newline). Each block between blank lines "
-            "will be delivered as its own iMessage bubble, so write accordingly: "
-            "one idea per bubble, 1–3 sentences each. "
-            "If the user needs a detailed answer, give the short version first "
-            "and offer to elaborate."
-        )
-    elif context.source.platform == Platform.YUANBAO:
-        lines.append("")
-        lines.append(
-            "**Platform notes:** You are running inside Yuanbao. "
-            "To send a private (DM) message to a user in the current group, "
-            "use the yb_send_dm tool (look up the recipient by name or pass "
-            "their user_id). Your normal reply is delivered to the group you "
-            "are responding in."
-        )
 
     # Connected platforms
     platforms_list = ["local (files on this machine)"]
@@ -1024,7 +867,7 @@ def build_channel_continuity_note(
     No LLM calls, no extra API/DB lookups — the previous session id is
     already known from :meth:`SessionStore.get_or_create_session`.
     """
-    if source.platform not in (Platform.SLACK, Platform.DISCORD):
+    if source.platform != Platform.LOCAL:
         return None
     if not getattr(entry, "reset_had_activity", False):
         return None
@@ -1100,43 +943,29 @@ def build_session_key(
     multiplexing gateway passes a non-default profile.
 
     DM rules:
-      - Slack ``scope_id`` identifies the workspace before chat/user ids. Other
-        platforms retain their existing key format; in particular, Discord
-        guild scope is intentionally not added here as a compatibility change.
       - DMs include chat_id when present, so each private conversation is isolated.
       - thread_id further differentiates threaded DMs within the same DM chat.
       - Without chat_id, thread_id is used as a best-effort fallback.
       - Without thread_id or chat_id, DMs share a single session.
 
     Group/channel rules:
-      - Slack ``scope_id`` identifies the workspace before chat/thread ids.
       - chat_id identifies the parent group/channel.
       - user_id/user_id_alt isolates participants within that parent chat when available when
         ``group_sessions_per_user`` is enabled.
       - thread_id differentiates threads within that parent chat.  When
         ``thread_sessions_per_user`` is False (default), threads are *shared* across all
         participants — user_id is NOT appended, so every user in the thread
-        shares a single session.  This is the expected UX for threaded
-        conversations (Telegram forum topics, Discord threads, Slack threads).
+        shares a single session.
       - Without participant identifiers, or when isolation is disabled, messages fall back to one
         shared session per chat.
       - Without identifiers, messages fall back to one session per platform/chat_type.
     """
     ns = _session_key_namespace(profile)
     platform = source.platform.value
-    slack_scope_id = (
-        str(source.scope_id)
-        if source.platform == Platform.SLACK and source.scope_id
-        else None
-    )
     if source.chat_type == "dm":
         dm_chat_id = source.chat_id
-        if source.platform == Platform.WHATSAPP:
-            dm_chat_id = canonical_whatsapp_identifier(source.chat_id)
 
         dm_parts = [ns, platform, "dm"]
-        if slack_scope_id:
-            dm_parts.append(slack_scope_id)
         if dm_chat_id:
             dm_parts.append(dm_chat_id)
             if source.thread_id:
@@ -1149,11 +978,6 @@ def build_session_key(
         # single cached agent ends up serving multiple people's conversations —
         # cross-user history bleed.  participant_id keeps DMs isolated per user.
         dm_participant_id = source.user_id_alt or source.user_id
-        if dm_participant_id and source.platform == Platform.WHATSAPP:
-            dm_participant_id = (
-                canonical_whatsapp_identifier(str(dm_participant_id))
-                or dm_participant_id
-            )
         if dm_participant_id:
             dm_parts.append(str(dm_participant_id))
             if source.thread_id:
@@ -1164,32 +988,19 @@ def build_session_key(
         return ":".join(str(part) for part in dm_parts)
 
     participant_id = source.user_id_alt or source.user_id
-    if participant_id and source.platform == Platform.WHATSAPP:
-        # Same JID/LID-flip bug as the DM case: without canonicalisation, a
-        # single group member gets two isolated per-user sessions when the
-        # bridge reshuffles alias forms.
-        participant_id = canonical_whatsapp_identifier(str(participant_id)) or participant_id
-    # Discord auto-thread continuity: a channel-initiating message carries no
+    # Auto-thread continuity: a channel-initiating message carries no
     # thread_id yet, but the connector tells us the thread its reply WILL be
     # auto-threaded into (prospective_thread_id == the message id, which becomes
     # the thread id). Key the session on that so the initiating channel message
     # and every follow-up that later arrives IN that thread (real thread_id ==
     # prospective_thread_id) resolve to the SAME session — "initiate in channel,
     # continue in thread". A real thread_id always wins when present.
-    #
-    # The follow-up arrives with chat_type="thread" while the initiating message
-    # has chat_type="group"/"channel"; normalize the chat_type slot to "thread"
-    # when keying on a prospective id so the two byte-match. (Real-thread events
-    # already carry chat_type="thread", so this only rewrites the initiating
-    # channel message's slot.)
     effective_thread_id = source.thread_id or source.prospective_thread_id
     chat_type_slot = source.chat_type
     if source.prospective_thread_id and not source.thread_id:
         chat_type_slot = "thread"
     key_parts = [ns, platform, chat_type_slot]
 
-    if slack_scope_id:
-        key_parts.append(slack_scope_id)
     if source.chat_id:
         key_parts.append(source.chat_id)
     if effective_thread_id:
@@ -1833,7 +1644,7 @@ class SessionStore:
         may be claimed by only one workspace because its old key contains no
         information that could safely distinguish multiple teams.
         """
-        if source.platform != Platform.SLACK or not source.scope_id:
+        if source.platform != Platform.LOCAL or not source.scope_id:
             return None
         legacy_source = replace(source, scope_id=None, guild_id=None)
         return build_session_key(
@@ -1880,7 +1691,7 @@ class SessionStore:
         this guard exists to avoid.
         """
         if (
-            source.platform != Platform.SLACK
+            source.platform != Platform.LOCAL
             or source.chat_type == "dm"
             or not source.scope_id
         ):

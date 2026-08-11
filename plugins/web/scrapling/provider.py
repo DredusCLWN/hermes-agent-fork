@@ -7,14 +7,15 @@ Capabilities:
 - ``supports_search()``  -> False
 - ``supports_extract()`` -> True
 
-No API key needed. The ``scrapling`` package is an optional dependency;
-``is_available()`` reflects whether the package is importable.
+No API key needed. Requires ``scrapling[fetchers]`` (includes ``curl_cffi``);
+``is_available()`` probes the real import path used by extract.
 
 Extract strategy:
-1. Try ``Fetcher`` (fast HTTP, TLS fingerprint impersonation) for static pages.
-2. On failure (JS-heavy, Cloudflare, empty content) fall back to ``StealthyFetcher``
-   (headless Chromium with anti-bot bypass).
-3. Return clean text/markdown — Scrapling strips boilerplate automatically.
+1. Try ``Fetcher.get`` (class method, fast HTTP, TLS fingerprint impersonation).
+2. On failure (JS-heavy, Cloudflare, empty content) fall back to
+   ``StealthyFetcher.fetch`` (headless Chromium with anti-bot bypass).
+3. Return clean text via ``page.get_all_text()`` — Scrapling strips
+   ``<script>``/``<style>`` automatically.
 """
 
 from __future__ import annotations
@@ -43,8 +44,15 @@ class ScraplingWebExtractProvider(WebSearchProvider):
         return "Scrapling (free extract)"
 
     def is_available(self) -> bool:
+        """Return True when the fetchers submodule is importable.
+
+        ``import scrapling`` succeeds with the parser-only install, but
+        ``scrapling.fetchers`` requires the ``[fetchers]`` extra (curl_cffi).
+        Probe the same import that ``_fetch_http`` uses so ``is_available``
+        cannot diverge from reality.
+        """
         try:
-            import scrapling  # noqa: F401
+            from scrapling.fetchers import Fetcher  # noqa: F401
 
             return True
         except ImportError:
@@ -142,57 +150,59 @@ class ScraplingWebExtractProvider(WebSearchProvider):
 
     @staticmethod
     def _fetch_http(url: str) -> tuple[str, str]:
-        """Fast HTTP fetch via Scrapling Fetcher with TLS fingerprint."""
-        from scrapling.fetch import Fetcher
+        """Fast HTTP fetch via Scrapling Fetcher with TLS fingerprint.
 
-        fetcher = Fetcher(timeout=_FETCH_TIMEOUT_SECS)
-        page = fetcher.get(url)
+        ``Fetcher.get`` is a class method — no instantiation needed.
+        """
+        from scrapling.fetchers import Fetcher
+
+        page = Fetcher.get(url, timeout=_FETCH_TIMEOUT_SECS)
 
         title = ""
         try:
-            title_el = page.css_first("title")
+            title_el = page.find("title")
             if title_el:
-                title = title_el.text.strip()
+                title = str(title_el.text).strip()
         except Exception:  # noqa: BLE001
             pass
 
         try:
-            h1 = page.css_first("h1")
+            h1 = page.find("h1")
             if h1 and not title:
-                title = h1.text.strip()
+                title = str(h1.text).strip()
         except Exception:  # noqa: BLE001
             pass
 
-        content = page.get_all_text() if hasattr(page, "get_all_text") else str(page)
+        content = str(page.get_all_text()) if hasattr(page, "get_all_text") else str(page)
         return content, title
 
     @staticmethod
     def _fetch_stealthy(url: str) -> tuple[str, str]:
         """Stealthy browser fetch via Scrapling StealthyFetcher.
 
+        ``StealthyFetcher.fetch`` is a class method — no instantiation needed.
         Bypasses Cloudflare Turnstile/Interstitial, renders JS.
         """
-        from scrapling.fetch import StealthyFetcher
+        from scrapling.fetchers import StealthyFetcher
 
-        fetcher = StealthyFetcher(timeout=_STEALTHY_TIMEOUT_SECS)
-        page = fetcher.fetch(url)
+        page = StealthyFetcher.fetch(url, headless=True, timeout=_STEALTHY_TIMEOUT_SECS)
 
         title = ""
         try:
-            title_el = page.css_first("title")
+            title_el = page.find("title")
             if title_el:
-                title = title_el.text.strip()
+                title = str(title_el.text).strip()
         except Exception:  # noqa: BLE001
             pass
 
         try:
-            h1 = page.css_first("h1")
+            h1 = page.find("h1")
             if h1 and not title:
-                title = h1.text.strip()
+                title = str(h1.text).strip()
         except Exception:  # noqa: BLE001
             pass
 
-        content = page.get_all_text() if hasattr(page, "get_all_text") else str(page)
+        content = str(page.get_all_text()) if hasattr(page, "get_all_text") else str(page)
         return content, title
 
     def get_setup_schema(self) -> Dict[str, Any]:
@@ -203,7 +213,7 @@ class ScraplingWebExtractProvider(WebSearchProvider):
                 "Anti-bot content extraction via Scrapling — no API key. "
                 "Bypasses Cloudflare, renders JS, returns clean text. "
                 "Pair with ddgs or brave_free for search. "
-                "Install: pip install scrapling"
+                "Install: pip install 'scrapling[fetchers]' && scrapling install && python -m patchright install chromium"
             ),
             "env_vars": [],
             "post_setup": "scrapling",

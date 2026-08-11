@@ -1042,13 +1042,6 @@ PLATFORM_HINTS = {
         "bubbles, and videos (.mp4) play inline. You can also include image "
         "URLs in markdown format ![alt](url) and they will be sent as native photos."
     ),
-    "discord": (
-        "You are in a Discord server or group chat communicating with your user. "
-        "You can send media files natively: include MEDIA:/absolute/path/to/file "
-        "in your response. Images (.png, .jpg, .webp) are sent as photo "
-        "attachments, audio as file attachments. You can also include image URLs "
-        "in markdown format ![alt](url) and they will be sent as attachments."
-    ),
     "slack": (
         "You are in a Slack workspace communicating with your user. "
         "You can send media files natively: include MEDIA:/absolute/path/to/file "
@@ -1163,14 +1156,6 @@ PLATFORM_HINTS = {
         "audio (.ogg, .mp3) as voice/audio messages, video (.mp4) inline, "
         "and other files as downloadable attachments."
     ),
-    "feishu": (
-        "You are in a Feishu (Lark) workspace communicating with your user. "
-        "Feishu renders Markdown in messages — bold, italic, code blocks, and "
-        "links are supported. "
-        "You can send media files natively: include MEDIA:/absolute/path/to/file "
-        "in your response. Images (.jpg, .png, .webp) are uploaded and displayed "
-        "inline, audio files as voice messages, and other files as attachments."
-    ),
     "weixin": (
         "You are on Weixin/WeChat. Markdown formatting is supported, so you may use it when "
         "it improves readability, but keep the message compact and chat-friendly. You can send media files natively: "
@@ -1196,29 +1181,6 @@ PLATFORM_HINTS = {
         "and emoji. You can send media files natively: include MEDIA:/absolute/path/to/file in "
         "your response. Images are sent as native photos, and other files arrive as downloadable "
         "documents."
-    ),
-    "yuanbao": (
-        "You are on Yuanbao (腾讯元宝), a Chinese AI assistant platform. "
-        "Markdown formatting is supported (code blocks, tables, bold/italic). "
-        "You CAN send media files natively — to deliver a file to the user, include "
-        "MEDIA:/absolute/path/to/file in your response. The file will be sent as a native "
-        "Yuanbao attachment: images (.jpg, .png, .webp, .gif) are sent as photos, "
-        "and other files (.pdf, .docx, .txt, .zip, etc.) arrive as downloadable documents "
-        "(max 50 MB). You can also include image URLs in markdown format ![alt](url) and "
-        "they will be downloaded and sent as native photos. "
-        "Do NOT tell the user you lack file-sending capability — use MEDIA: syntax "
-        "whenever a file delivery is appropriate.\n\n"
-        "Stickers (贴纸 / 表情包 / TIM face): Yuanbao has a built-in sticker catalogue. "
-        "When the user sends a sticker (you see '[emoji: 名称]' in their message) or asks "
-        "you to send/reply-with a 贴纸/表情/表情包, you MUST use the sticker tools:\n"
-        "  1. Call yb_search_sticker with a Chinese keyword (e.g. '666', '比心', '吃瓜', "
-        "     '捂脸', '合十') to discover matching sticker_ids.\n"
-        "  2. Call yb_send_sticker with the chosen sticker_id or name — this sends a real "
-        "     TIMFaceElem that renders as a native sticker in the chat.\n"
-        "DO NOT draw sticker-like PNGs with execute_code/Pillow/matplotlib and then send "
-        "them via MEDIA: or send_image_file. That produces a fake low-quality 'sticker' "
-        "image and is the WRONG path. Bare Unicode emoji in text is also not a substitute "
-        "— when a sticker is the right response, use yb_send_sticker."
     ),
     "api_server": (
         "You're responding through an API server. The rendering layer is unknown — "

@@ -231,27 +231,3 @@ def _load_video_gen_plugin(monkeypatch):
     return plugin_mod
 
 
-def test_video_gen_happy_horse_uses_alibaba_namespace():
-    """Verify the happy-horse family uses alibaba/ not fal-ai/ endpoints."""
-    _install_fake_tools_package()
-
-    # Load just the plugin module to check the catalog
-    plugin_init = PLUGINS_DIR / "video_gen" / "fal" / "__init__.py"
-
-    agent_dir = Path(__file__).resolve().parents[2] / "agent"
-    spec = spec_from_file_location(
-        "agent.video_gen_provider",
-        agent_dir / "video_gen_provider.py",
-    )
-    mod = module_from_spec(spec)
-    sys.modules["agent.video_gen_provider"] = mod
-    spec.loader.exec_module(mod)
-
-    spec = spec_from_file_location("plugins.video_gen.fal", plugin_init)
-    plugin_mod = module_from_spec(spec)
-    sys.modules["plugins.video_gen.fal"] = plugin_mod
-    spec.loader.exec_module(plugin_mod)
-
-    hh = plugin_mod.FAL_FAMILIES["happy-horse"]
-    assert hh["text_endpoint"] == "alibaba/happy-horse/text-to-video"
-    assert hh["image_endpoint"] == "alibaba/happy-horse/image-to-video"

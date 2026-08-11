@@ -144,44 +144,6 @@ def test_prompt_enable_tool_gateway_pool_offers_covered_tools_only(monkeypatch):
 
 
 
-def test_apply_nous_managed_defaults_writes_video_gen_config(monkeypatch):
-    """apply_nous_managed_defaults must write video_gen.provider and
-    video_gen.use_gateway when a Nous subscriber selects video_gen
-    without a direct FAL_KEY."""
-    monkeypatch.setattr(ns, "managed_nous_tools_enabled", lambda **kw: True)
-    monkeypatch.delenv("FAL_KEY", raising=False)
-    monkeypatch.setattr(ns, "fal_key_is_configured", lambda: False)
-    monkeypatch.setattr(
-        ns, "get_nous_portal_account_info",
-        lambda **kw: _account(logged_in=True, paid=True),
-    )
-
-    config = {"model": {"provider": "nous"}}
-    changed = ns.apply_nous_managed_defaults(
-        config, enabled_toolsets=["video_gen"],
-    )
-
-    assert "video_gen" in changed
-    assert config["video_gen"]["provider"] == "fal"
-    assert config["video_gen"]["use_gateway"] is True
-
-
-# ---------------------------------------------------------------------------
-# ensure_nous_portal_access — inline login gate for `hermes tools`
-# ---------------------------------------------------------------------------
-
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# STT — managed-by-Nous detection (Phase 4 follow-up)
-# ---------------------------------------------------------------------------
-
-
-
-
 
 def _stt_features_stub(*, account_info):
     return ns.NousSubscriptionFeatures(

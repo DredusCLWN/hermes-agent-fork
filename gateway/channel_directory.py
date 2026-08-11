@@ -87,9 +87,7 @@ def _normalize_channel_query(value: str) -> str:
 def _channel_target_name(platform_name: str, channel: Dict[str, Any]) -> str:
     """Return the human-facing target label shown to users for a channel entry."""
     name = channel["name"]
-    if platform_name == "discord" and channel.get("guild"):
-        return f"#{name}"
-    if platform_name != "discord" and channel.get("type"):
+    if channel.get("type"):
         return f"{name} ({channel['type']})"
     return name
 
@@ -157,10 +155,6 @@ async def build_channel_directory(adapters: Dict[Any, Any]) -> Dict[str, Any]:
                 if platform_channels is not None:
                     platforms[platform.value] = _normalize_adapter_channels(platform_channels)
                     continue
-            if platform == Platform.DISCORD:
-                platforms["discord"] = await asyncio.to_thread(_build_discord, adapter)
-            elif platform == Platform.SLACK:
-                platforms["slack"] = await _build_slack(adapter)
         except Exception as e:
             logger.warning("Channel directory: failed to build %s: %s", platform.value, e)
 
@@ -211,43 +205,6 @@ async def build_channel_directory(adapters: Dict[Any, Any]) -> Dict[str, Any]:
         logger.warning("Channel directory: failed to write: %s", e)
 
     return directory
-
-
-def _build_discord(adapter) -> List[Dict[str, str]]:
-    """Enumerate all text channels and forum channels the Discord bot can see."""
-    channels = []
-    client = getattr(adapter, "_client", None)
-    if not client:
-        return channels
-
-    try:
-        import discord as _discord  # noqa: F401 — SDK presence check
-    except ImportError:
-        return channels
-
-    for guild in client.guilds:
-        for ch in guild.text_channels:
-            channels.append({
-                "id": str(ch.id),
-                "name": ch.name,
-                "guild": guild.name,
-                "type": "channel",
-            })
-        # Forum channels (type 15) — creating a message auto-spawns a thread post.
-        forums = getattr(guild, "forum_channels", None) or []
-        for ch in forums:
-            channels.append({
-                "id": str(ch.id),
-                "name": ch.name,
-                "guild": guild.name,
-                "type": "forum",
-            })
-        # Also include DM-capable users we've interacted with is not
-        # feasible via guild enumeration; those come from sessions.
-
-    # Merge any DMs from session history
-    channels.extend(_build_from_sessions("discord"))
-    return channels
 
 
 def _slack_api_error_code(error: Exception) -> Optional[str]:
@@ -626,31 +583,10 @@ def format_directory_for_display(platforms: Optional[Dict[str, Any]] = None) -> 
             lines.append("")
             continue
 
-        # Group Discord channels by guild
-        if plat_name == "discord":
-            guilds: Dict[str, List] = {}
-            dms: List = []
-            for ch in channels:
-                guild = ch.get("guild")
-                if guild:
-                    guilds.setdefault(guild, []).append(ch)
-                else:
-                    dms.append(ch)
-
-            for guild_name, guild_channels in sorted(guilds.items()):
-                lines.append(f"Discord ({guild_name}):")
-                for ch in sorted(guild_channels, key=lambda c: c["name"]):
-                    lines.append(f"  discord:{_channel_target_name(plat_name, ch)}")
-            if dms:
-                lines.append("Discord (DMs):")
-                for ch in dms:
-                    lines.append(f"  discord:{_channel_target_name(plat_name, ch)}")
-            lines.append("")
-        else:
-            lines.append(f"{plat_name.title()}:")
-            for ch in channels:
-                lines.append(f"  {plat_name}:{_channel_target_name(plat_name, ch)}")
-            lines.append("")
+        lines.append(f"{plat_name.title()}:")
+        for ch in channels:
+            lines.append(f"  {plat_name}:{_channel_target_name(plat_name, ch)}")
+        lines.append("")
 
     lines.append('Use these as the "target" parameter when sending.')
     lines.append('Bare platform name (e.g. "telegram") sends to home channel.')

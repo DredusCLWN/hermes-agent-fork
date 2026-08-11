@@ -791,9 +791,6 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
     # need the optional platform adapter imports below. Keep this branch early
     # so a Weixin send is not blocked by unrelated optional dependencies (for
     # example lark-oapi's heavy Feishu import path).
-    if platform == Platform.WEIXIN:
-        return await _send_weixin(pconfig, chat_id, message, media_files=media_files)
-
     from gateway.platforms.base import BasePlatformAdapter, utf16_len
 
     # Telegram adapter import is optional (requires python-telegram-bot)
@@ -817,7 +814,6 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
     # resolved via the registry fallback below — covers Slack and Feishu, both
     # migrated to plugins in #41112).
     _MAX_LENGTHS = {
-        Platform.TELEGRAM: TelegramAdapter.MAX_MESSAGE_LENGTH if _telegram_available else 4096,
     }
 
     # Check plugin registry for max_message_length
@@ -835,7 +831,7 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
     # Telegram measures length in UTF-16 code units, not Unicode codepoints.
     max_len = _MAX_LENGTHS.get(platform)
     if max_len:
-        _len_fn = utf16_len if platform == Platform.TELEGRAM else None
+        _len_fn = None
         chunks = BasePlatformAdapter.truncate_message(message, max_len, len_fn=_len_fn)
     else:
         chunks = [message]
@@ -846,233 +842,20 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
     # length so escaping inflation can't push a chunk over Telegram's 4096
     # limit (issue #28557). Pass the whole message in one call; media attaches
     # after all text chunks.
-    if platform == Platform.TELEGRAM:
-        disable_link_previews = bool(getattr(pconfig, "extra", {}) and pconfig.extra.get("disable_link_previews"))
-        return await _send_telegram(
-            pconfig.token,
-            chat_id,
-            message,
-            media_files=media_files,
-            thread_id=thread_id,
-            disable_link_previews=disable_link_previews,
-            force_document=force_document,
-        )
-
-    # --- Discord: chunked delivery via the registry's standalone_sender_fn.
-    # The plugin's ``_standalone_send`` (registered in
-    # plugins/platforms/discord/adapter.py) handles forum channels, threads,
-    # and multipart media uploads.  ``_send_via_adapter`` tries the live
-    # in-process adapter first via ``adapter.send()``, but Discord's elif
-    # historically went straight to the HTTP path; we preserve that by
-    # explicitly invoking the registry hook here so behavior is unchanged.
-    if platform == Platform.DISCORD:
-        from gateway.platform_registry import platform_registry
-        entry = platform_registry.get("discord")
-        if entry is None or entry.standalone_sender_fn is None:
-            return {"error": "Discord plugin not registered or missing standalone_sender_fn"}
-        # MEDIA:<path> caption: single captionable file + short text rides as
-        # the media message content instead of a separate message before the
-        # attachment (single enforced decision in _media_caption_split). Cap on
-        # the platform's own message limit so the caption is always deliverable.
-        _dc_caption, _ = _media_caption_split(
-            message, media_files,
-            max_caption_len=(max_len or _DEFAULT_CAPTION_LIMIT),
-        )
-        if _dc_caption is not None:
-            result = await entry.standalone_sender_fn(
-                pconfig,
-                chat_id,
-                "",
-                thread_id=thread_id,
-                media_files=media_files,
-                caption=_dc_caption,
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            return result
-        last_result = None
-        for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
-            result = await entry.standalone_sender_fn(
-                pconfig,
-                chat_id,
-                chunk,
-                thread_id=thread_id,
-                media_files=media_files if is_last else [],
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            last_result = result
-        return last_result
-
     # --- Matrix: route ALL sends through the native adapter so text is
     # encrypted in E2EE rooms too (issue: text-only sends arrived with a red
     # padlock because they took the raw-HTTP standalone path). The adapter
     # reuses the live gateway's E2EE session when available (#46310) and falls
     # back to an encryption-aware ephemeral adapter for standalone/cron. ---
-    if platform == Platform.MATRIX:
-        last_result = None
-        for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
-            result = await _send_matrix_via_adapter(
-                pconfig,
-                chat_id,
-                chunk,
-                media_files=media_files if is_last else [],
-                thread_id=thread_id,
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            last_result = result
-        return last_result
-
     # --- Signal: native attachment support via JSON-RPC attachments param ---
-    if platform == Platform.SIGNAL and media_files:
-        last_result = None
-        for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
-            result = await _send_signal(
-                pconfig.extra,
-                chat_id,
-                chunk,
-                media_files=media_files if is_last else [],
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            last_result = result
-        return last_result
-
-    # --- Yuanbao: native media attachment support via running gateway adapter ---
-    if platform == Platform.YUANBAO and media_files:
-        last_result = None
-        for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
-            result = await _send_yuanbao(
-                chat_id,
-                chunk,
-                media_files=media_files if is_last else None,
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            last_result = result
-        return last_result
-
-    # --- Feishu: native media attachment support via the registry's
-    # standalone_sender_fn (plugins/platforms/feishu/adapter.py::_standalone_send). #41112
-    if platform == Platform.FEISHU and media_files:
-        from gateway.platform_registry import platform_registry as _pr_feishu
-        from hermes_cli.plugins import discover_plugins as _dp_feishu
-        _dp_feishu()
-        _feishu_entry = _pr_feishu.get("feishu")
-        if _feishu_entry is None or _feishu_entry.standalone_sender_fn is None:
-            return {"error": "Feishu plugin not registered or missing standalone_sender_fn"}
-        last_result = None
-        for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
-            result = await _feishu_entry.standalone_sender_fn(
-                pconfig,
-                chat_id,
-                chunk,
-                media_files=media_files if is_last else None,
-                thread_id=thread_id,
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            last_result = result
-        return last_result
-
     # --- Slack: native media via files_upload_v2 in the plugin's
     # standalone_sender_fn (plugins/platforms/slack/adapter.py::_standalone_send).
     # Gateway in-channel MEDIA: delivery already worked; send_message previously
     # omitted Slack attachments and told the model media was unsupported.
-    if platform == Platform.SLACK and media_files:
-        from gateway.platform_registry import platform_registry as _pr_slack
-        from hermes_cli.plugins import discover_plugins as _dp_slack
-        _dp_slack()
-        _slack_entry = _pr_slack.get("slack")
-        if _slack_entry is None or _slack_entry.standalone_sender_fn is None:
-            return {"error": "Slack plugin not registered or missing standalone_sender_fn"}
-        _sl_caption, _ = _media_caption_split(
-            message, media_files,
-            max_caption_len=(max_len or _DEFAULT_CAPTION_LIMIT),
-        )
-        if _sl_caption is not None:
-            result = await _slack_entry.standalone_sender_fn(
-                pconfig,
-                chat_id,
-                "",
-                thread_id=thread_id,
-                media_files=media_files,
-                caption=_sl_caption,
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            return result
-        last_result = None
-        for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
-            result = await _slack_entry.standalone_sender_fn(
-                pconfig,
-                chat_id,
-                chunk,
-                thread_id=thread_id,
-                media_files=media_files if is_last else [],
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            last_result = result
-        return last_result
-
     # --- WhatsApp: native media attachment support via the registry's
     # standalone_sender_fn (plugins/platforms/whatsapp/adapter.py::_standalone_send).
     # The plugin uploads each file through the local Baileys bridge /send-media
     # endpoint so images/videos/audio arrive as native bubbles, not documents. #41112
-    if platform == Platform.WHATSAPP and media_files:
-        from gateway.platform_registry import platform_registry as _pr_wa
-        from hermes_cli.plugins import discover_plugins as _dp_wa
-        _dp_wa()
-        _wa_entry = _pr_wa.get("whatsapp")
-        if _wa_entry is None or _wa_entry.standalone_sender_fn is None:
-            return {"error": "WhatsApp plugin not registered or missing standalone_sender_fn"}
-        # MEDIA:<path> caption: a single captionable file + short text rides
-        # as the media's native caption instead of a separate message before
-        # the bubble (single enforced decision in _media_caption_split). Cap on
-        # the platform's own message limit so the caption is always deliverable.
-        _wa_caption, _ = _media_caption_split(
-            message, media_files,
-            max_caption_len=(max_len or _DEFAULT_CAPTION_LIMIT),
-        )
-        last_result = None
-        if _wa_caption is not None:
-            # Single-file captioned send: no separate text chunk, caption on
-            # the media itself.
-            result = await _wa_entry.standalone_sender_fn(
-                pconfig,
-                chat_id,
-                "",
-                media_files=media_files,
-                thread_id=thread_id,
-                force_document=force_document,
-                caption=_wa_caption,
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            return result
-        for i, chunk in enumerate(chunks):
-            is_last = (i == len(chunks) - 1)
-            result = await _wa_entry.standalone_sender_fn(
-                pconfig,
-                chat_id,
-                chunk,
-                media_files=media_files if is_last else None,
-                thread_id=thread_id,
-                force_document=force_document,
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            last_result = result
-        return last_result
-
     # --- Slack: prefer the live gateway adapter, then the plugin's
     # standalone sender.  The live adapter is multi-workspace aware (it maps
     # channels to the workspace client that owns them) and honors adapter-side
@@ -1081,24 +864,6 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
     # adapter first and falls back to the registry standalone sender for
     # out-of-process cron runs, preserving MEDIA delivery on the fallback
     # (media-bearing sends were already intercepted by the branch above).
-    if platform == Platform.SLACK:
-        last_result = None
-        for i, chunk in enumerate(chunks):
-            is_last = i == len(chunks) - 1
-            result = await _send_via_adapter(
-                platform,
-                pconfig,
-                chat_id,
-                chunk,
-                thread_id=thread_id,
-                media_files=media_files if is_last else [],
-                force_document=force_document,
-            )
-            if isinstance(result, dict) and result.get("error"):
-                return result
-            last_result = result
-        return last_result
-
     # --- Non-media platforms ---
     if media_files and not message.strip():
         return {
@@ -1116,39 +881,6 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
 
     last_result = None
     for chunk in chunks:
-        if platform == Platform.WHATSAPP:
-            result = await _registry_standalone_send("whatsapp", pconfig, chat_id, chunk, thread_id)
-        elif platform == Platform.SIGNAL:
-            result = await _send_signal(pconfig.extra, chat_id, chunk)
-        elif platform == Platform.EMAIL:
-            result = await _registry_standalone_send("email", pconfig, chat_id, chunk, thread_id)
-        elif platform == Platform.SMS:
-            result = await _registry_standalone_send("sms", pconfig, chat_id, chunk, thread_id)
-        elif platform == Platform.DINGTALK:
-            result = await _registry_standalone_send("dingtalk", pconfig, chat_id, chunk, thread_id)
-        elif platform == Platform.FEISHU:
-            result = await _registry_standalone_send("feishu", pconfig, chat_id, chunk, thread_id)
-        elif platform == Platform.WECOM:
-            result = await _registry_standalone_send("wecom", pconfig, chat_id, chunk, thread_id)
-        elif platform == Platform.BLUEBUBBLES:
-            result = await _send_bluebubbles(pconfig.extra, chat_id, chunk)
-        elif platform == Platform.QQBOT:
-            result = await _send_qqbot(pconfig, chat_id, chunk)
-        elif platform == Platform.YUANBAO:
-            result = await _send_yuanbao(chat_id, chunk)
-        else:
-            # Plugin platform: route through the gateway's live adapter if
-            # available, otherwise the plugin's standalone_sender_fn.
-            result = await _send_via_adapter(
-                platform,
-                pconfig,
-                chat_id,
-                chunk,
-                thread_id=thread_id,
-                media_files=media_files,
-                force_document=force_document,
-            )
-
         if isinstance(result, dict) and result.get("error"):
             return result
         last_result = result
@@ -1815,7 +1547,7 @@ async def _send_matrix_via_adapter(pconfig, chat_id, message, media_files=None, 
     if runner is not None:
         try:
             from gateway.config import Platform
-            live_adapter = runner.adapters.get(Platform.MATRIX)
+            live_adapter = runner.adapters.get()
         except Exception:
             logger.warning(
                 "Matrix: live gateway adapter lookup failed; falling back to an "
@@ -2055,35 +1787,6 @@ async def _send_qqbot(pconfig, chat_id, message):
             return _error(f"QQBot send failed: channel={resp.status_code} c2c={resp_c2c.status_code} group={resp_group.status_code}")
     except Exception as e:
         return _error(f"QQBot send failed: {e}")
-
-
-async def _send_yuanbao(chat_id, message, media_files=None):
-    """Send via Yuanbao using the running gateway adapter's WebSocket connection.
-
-    Yuanbao uses a persistent WebSocket — unlike HTTP-based platforms, we
-    cannot create a throwaway client.  We obtain the running singleton from
-    the adapter module itself (``get_active_adapter``).
-
-    chat_id format:
-      - Group: "group:<group_code>"
-      - DM:    "direct:<account_id>" or just "<account_id>"
-    """
-    try:
-        from gateway.platforms.yuanbao import get_active_adapter, send_yuanbao_direct
-    except ImportError:
-        return _error("Yuanbao adapter module not available.")
-
-    adapter = get_active_adapter()
-    if adapter is None:
-        return _error(
-            "Yuanbao adapter is not running. "
-            "Start the gateway with yuanbao platform enabled first."
-        )
-
-    try:
-        return await send_yuanbao_direct(adapter, chat_id, message, media_files=media_files)
-    except Exception as e:
-        return _error(f"Yuanbao send failed: {e}")
 
 
 # --- Registry ---

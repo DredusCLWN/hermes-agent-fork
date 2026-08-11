@@ -45,9 +45,6 @@ _NEVER_PARALLEL_TOOLS = frozenset({"clarify"})
 
 # Read-only tools with no shared mutable session state.
 _PARALLEL_SAFE_TOOLS = frozenset({
-    "ha_get_state",
-    "ha_list_entities",
-    "ha_list_services",
     "image_generate",
     "read_file",
     "read_preview",
@@ -59,7 +56,6 @@ _PARALLEL_SAFE_TOOLS = frozenset({
     "vision_analyze",
     "web_extract",
     "web_search",
-    "x_search",
 })
 
 # Filesystem tools whose parallel admission is decided by path overlap.

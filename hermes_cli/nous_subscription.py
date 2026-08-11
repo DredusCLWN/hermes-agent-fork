@@ -30,13 +30,10 @@ _DEFAULT_PLATFORM_TOOLSETS = {
 
 # Maps a tools_config provider's ``managed_nous_feature`` to the tool-pool
 # coverage category (hermes_cli.nous_account.TOOL_COVERAGE_CATEGORIES). Lets the
-# `hermes tools` picker scope its entitlement gate to the selected backend, so a
-# free-tool-pool user is allowed image gen but denied video gen at select time —
-# consistent with the per-category feature gates in get_nous_subscription_features.
+# `hermes tools` picker scope its entitlement gate to the selected backend.
 MANAGED_FEATURE_COVERAGE_CATEGORY: Dict[str, str] = {
     "web": "firecrawl",
     "image_gen": "fal",
-    "video_gen": "fal-video",
     "browser": "browser-use",
     "modal": "modal",
 }
@@ -84,15 +81,11 @@ class NousSubscriptionFeatures:
         return self.features["browser"]
 
     @property
-    def video_gen(self) -> NousFeatureState:
-        return self.features["video_gen"]
-
-    @property
     def modal(self) -> NousFeatureState:
         return self.features["modal"]
 
     def items(self) -> Iterable[NousFeatureState]:
-        ordered = ("web", "image_gen", "video_gen", "browser", "modal")
+        ordered = ("web", "image_gen", "browser", "modal")
         for key in ordered:
             yield self.features[key]
 
@@ -327,7 +320,6 @@ def get_nous_subscription_features(
 
     web_tool_enabled = _toolset_enabled(config, "web")
     image_tool_enabled = _toolset_enabled(config, "image_gen")
-    video_tool_enabled = _toolset_enabled(config, "video_gen")
     browser_tool_enabled = _toolset_enabled(config, "browser")
     modal_tool_enabled = _toolset_enabled(config, "terminal")
 
@@ -357,8 +349,6 @@ def get_nous_subscription_features(
     browser_use_gateway = _uses_gateway(browser_cfg)
     image_gen_cfg = config.get("image_gen") if isinstance(config.get("image_gen"), dict) else {}
     image_use_gateway = _uses_gateway(image_gen_cfg)
-    video_gen_cfg = config.get("video_gen") if isinstance(config.get("video_gen"), dict) else {}
-    video_use_gateway = _uses_gateway(video_gen_cfg)
 
     direct_exa = bool(get_env_value("EXA_API_KEY"))
     direct_firecrawl = bool(get_env_value("FIRECRAWL_API_KEY") or get_env_value("FIRECRAWL_API_URL"))
@@ -366,7 +356,6 @@ def get_nous_subscription_features(
     direct_tavily = bool(get_env_value("TAVILY_API_KEY"))
     direct_searxng = bool(get_env_value("SEARXNG_URL"))
     direct_fal = fal_key_is_configured()
-    direct_fal_video = direct_fal  # same FAL_KEY; separate var so use_gateway is independent
     direct_camofox = bool(get_env_value("CAMOFOX_URL"))
     direct_browserbase = bool(get_env_value("BROWSERBASE_API_KEY") and get_env_value("BROWSERBASE_PROJECT_ID"))
     direct_browser_use = bool(get_env_value("BROWSER_USE_API_KEY"))
@@ -380,8 +369,6 @@ def get_nous_subscription_features(
         direct_tavily = False
     if image_use_gateway:
         direct_fal = False
-    if video_use_gateway:
-        direct_fal_video = False
     if browser_use_gateway:
         direct_browser_use = False
         direct_browserbase = False
@@ -397,15 +384,6 @@ def get_nous_subscription_features(
         and nous_auth_present
         and is_managed_tool_gateway_ready("fal-queue")
         and _entitled_for("fal")
-    )
-    # Video gen rides the same fal-queue gateway as image gen, but the free tool
-    # pool funds image and NOT video — so gate it on its own coverage category
-    # rather than aliasing it to image. (Paid users are entitled to both.)
-    managed_video_available = (
-        managed_tools_flag
-        and nous_auth_present
-        and is_managed_tool_gateway_ready("fal-queue")
-        and _entitled_for("fal-video")
     )
     managed_browser_available = (
         managed_tools_flag
@@ -452,10 +430,6 @@ def get_nous_subscription_features(
     image_managed = image_tool_enabled and managed_image_available and not direct_fal
     image_active = bool(image_tool_enabled and (image_managed or direct_fal))
     image_available = bool(managed_image_available or direct_fal)
-
-    video_managed = video_tool_enabled and managed_video_available and not direct_fal_video
-    video_active = bool(video_tool_enabled and (video_managed or direct_fal_video))
-    video_available = bool(managed_video_available or direct_fal_video)
 
     browser_local_available = _has_agent_browser()
     browser_local_runnable = _local_browser_runnable()
@@ -532,18 +506,6 @@ def get_nous_subscription_features(
             toolset_enabled=image_tool_enabled,
             current_provider="FAL" if direct_fal else ("Nous Subscription" if image_managed else ""),
             explicit_configured=direct_fal,
-        ),
-        "video_gen": NousFeatureState(
-            key="video_gen",
-            label="Video generation",
-            included_by_default=False,
-            available=video_available,
-            active=video_active,
-            managed_by_nous=video_managed,
-            direct_override=video_active and not video_managed,
-            toolset_enabled=video_tool_enabled,
-            current_provider="FAL" if direct_fal_video else ("Nous Subscription" if video_managed else ""),
-            explicit_configured=direct_fal_video,
         ),
         "browser": NousFeatureState(
             key="browser",
@@ -636,21 +598,6 @@ def apply_nous_managed_defaults(
         image_cfg["use_gateway"] = True
         changed.add("image_gen")
 
-    # Video gen is not funded by the free tool pool, so only wire managed video
-    # defaults for users entitled to it (paid). Pool-only users keep video off.
-    if (
-        "video_gen" in selected_toolsets
-        and not fal_key_is_configured()
-        and features.account_info.tool_gateway_entitled_for("fal-video")
-    ):
-        video_cfg = config.get("video_gen")
-        if not isinstance(video_cfg, dict):
-            video_cfg = {}
-            config["video_gen"] = video_cfg
-        video_cfg["provider"] = "fal"
-        video_cfg["use_gateway"] = True
-        changed.add("video_gen")
-
     return changed
 
 
@@ -661,7 +608,6 @@ def apply_nous_managed_defaults(
 _GATEWAY_TOOL_LABELS = {
     "web": "Web search & extract (Firecrawl)",
     "image_gen": "Image generation (FAL)",
-    "video_gen": "Video generation (FAL)",
     "browser": "Browser automation (Browser Use)",
 }
 
@@ -678,7 +624,6 @@ def _get_gateway_direct_credentials() -> Dict[str, bool]:
             or get_env_value("EXA_API_KEY")
         ),
         "image_gen": fal_direct,
-        "video_gen": fal_direct,
         "browser": bool(
             get_env_value("BROWSER_USE_API_KEY")
             or (get_env_value("BROWSERBASE_API_KEY") and get_env_value("BROWSERBASE_PROJECT_ID"))
@@ -689,11 +634,10 @@ def _get_gateway_direct_credentials() -> Dict[str, bool]:
 _GATEWAY_DIRECT_LABELS = {
     "web": "Firecrawl/Exa/Parallel/Tavily key",
     "image_gen": "FAL key",
-    "video_gen": "FAL key",
     "browser": "Browser Use/Browserbase key",
 }
 
-_ALL_GATEWAY_KEYS = ("web", "image_gen", "video_gen", "browser")
+_ALL_GATEWAY_KEYS = ("web", "image_gen", "browser")
 
 
 def get_gateway_eligible_tools(
@@ -737,7 +681,6 @@ def get_gateway_eligible_tools(
     opted_in = {
         "web": _uses_gateway(config.get("web")),
         "image_gen": _uses_gateway(config.get("image_gen")),
-        "video_gen": _uses_gateway(config.get("video_gen")),
         "browser": _uses_gateway(config.get("browser")),
     }
 
@@ -801,15 +744,6 @@ def apply_gateway_defaults(
             config["image_gen"] = image_cfg
         image_cfg["use_gateway"] = True
         changed.add("image_gen")
-
-    if "video_gen" in tool_keys:
-        video_cfg = config.get("video_gen")
-        if not isinstance(video_cfg, dict):
-            video_cfg = {}
-            config["video_gen"] = video_cfg
-        video_cfg["provider"] = "fal"
-        video_cfg["use_gateway"] = True
-        changed.add("video_gen")
 
     return changed
 

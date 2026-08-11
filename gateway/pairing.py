@@ -29,10 +29,6 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from gateway.whatsapp_identity import (
-    expand_whatsapp_aliases,
-    normalize_whatsapp_identifier,
-)
 from hermes_constants import (
     get_default_hermes_root,
     get_hermes_dir,
@@ -66,26 +62,7 @@ PAIRING_DIR = get_hermes_dir("platforms/pairing", "pairing")
 # of drifting from an opaque approved.json (#23778 consolidation, option i).
 # Platforms absent from this map (or with no allowlist configured) keep the
 # pairing store as the sole grant record, honored by the authz union.
-_PLATFORM_ALLOWLIST_ENV = {
-    "telegram": "TELEGRAM_ALLOWED_USERS",
-    "discord": "DISCORD_ALLOWED_USERS",
-    "whatsapp": "WHATSAPP_ALLOWED_USERS",
-    "whatsapp_cloud": "WHATSAPP_CLOUD_ALLOWED_USERS",
-    "slack": "SLACK_ALLOWED_USERS",
-    "signal": "SIGNAL_ALLOWED_USERS",
-    "email": "EMAIL_ALLOWED_USERS",
-    "sms": "SMS_ALLOWED_USERS",
-    "mattermost": "MATTERMOST_ALLOWED_USERS",
-    "matrix": "MATRIX_ALLOWED_USERS",
-    "dingtalk": "DINGTALK_ALLOWED_USERS",
-    "feishu": "FEISHU_ALLOWED_USERS",
-    "wecom": "WECOM_ALLOWED_USERS",
-    "wecom_callback": "WECOM_CALLBACK_ALLOWED_USERS",
-    "weixin": "WEIXIN_ALLOWED_USERS",
-    "bluebubbles": "BLUEBUBBLES_ALLOWED_USERS",
-    "qqbot": "QQ_ALLOWED_USERS",
-    "yuanbao": "YUANBAO_ALLOWED_USERS",
-}
+_PLATFORM_ALLOWLIST_ENV = {}
 
 
 def _allowlist_env_for_platform(platform: str) -> Optional[str]:
@@ -115,15 +92,12 @@ def _split_allowlist(raw: str) -> list:
 
 def _platform_uses_whatsapp_identity(platform: str) -> bool:
     """True for Baileys WhatsApp and Meta Cloud — same phone/JID identity rules."""
-    return (platform or "").strip().lower() in {"whatsapp", "whatsapp_cloud"}
+    return False
 
 
 def _normalize_user_id(platform: str, user_id: str) -> str:
     """Normalize platform-specific user IDs before persisting / comparing them."""
-    raw_user_id = str(user_id or "").strip()
-    if _platform_uses_whatsapp_identity(platform):
-        return normalize_whatsapp_identifier(raw_user_id) or raw_user_id
-    return raw_user_id
+    return str(user_id or "").strip()
 
 
 def _user_id_aliases(platform: str, user_id: str) -> set[str]:
@@ -131,12 +105,7 @@ def _user_id_aliases(platform: str, user_id: str) -> set[str]:
     raw_user_id = str(user_id or "").strip()
     if not raw_user_id:
         return set()
-
-    aliases = {raw_user_id, _normalize_user_id(platform, raw_user_id)}
-    if _platform_uses_whatsapp_identity(platform):
-        aliases.update(expand_whatsapp_aliases(raw_user_id))
-    aliases.discard("")
-    return aliases
+    return {raw_user_id}
 
 
 def _user_ids_match(platform: str, left: str, right: str) -> bool:

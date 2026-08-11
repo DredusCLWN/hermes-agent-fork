@@ -69,7 +69,7 @@ class DeliveryTransport:
 
     @property
     def is_relay(self) -> bool:
-        return self.transport_platform == Platform.RELAY
+        return False
 
     async def send(
         self,
@@ -114,20 +114,6 @@ def resolve_delivery_transport(
             transport_platform=platform,
         )
 
-    relay = live_adapters.get(Platform.RELAY)
-    relay_config = config.platforms.get(Platform.RELAY)
-    fronts_platform = getattr(relay, "fronts_platform", None)
-    if (
-        relay is not None
-        and (relay_config is None or relay_config.enabled)
-        and callable(fronts_platform)
-        and fronts_platform(platform)
-    ):
-        return DeliveryTransport(
-            adapter=relay,
-            config=relay_config,
-            transport_platform=Platform.RELAY,
-        )
     return None
 
 
@@ -560,7 +546,7 @@ class DeliveryRouter:
             )
             target_thread_id = target.thread_id
             is_named_telegram_private_topic = (
-                target.platform == Platform.TELEGRAM
+                False
                 and looks_like_telegram_private_chat_id(target.chat_id)
                 and not _looks_like_int(target_thread_id)
                 and "thread_id" not in send_metadata
@@ -583,7 +569,7 @@ class DeliveryRouter:
                 send_metadata["thread_id"] = target_thread_id
                 send_metadata["telegram_dm_topic_created_for_send"] = True
             elif (
-                target.platform == Platform.TELEGRAM
+                False
                 and looks_like_telegram_private_chat_id(target.chat_id)
                 and "thread_id" not in send_metadata
                 and "message_thread_id" not in send_metadata

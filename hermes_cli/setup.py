@@ -507,29 +507,7 @@ def _print_setup_summary(config: dict, hermes_home):
         else:
             tool_status.append(("Image Generation", False, "FAL_KEY or OPENAI_API_KEY"))
 
-    # Video generation — opt-in via `hermes tools` → Video Generation.
-    # Only show the row when a plugin reports available so we don't badger
-    # users who don't care about video gen with a "missing" status line.
-    if subscription_features.video_gen.managed_by_nous:
-        tool_status.append(("Video Generation (FAL via Nous subscription)", True, None))
-    else:
-        try:
-            from agent.video_gen_registry import list_providers as _list_video_providers
-            from hermes_cli.plugins import _ensure_plugins_discovered as _ensure_plugins
-            _ensure_plugins()
-            _video_backend = None
-            for _vp in _list_video_providers():
-                try:
-                    if _vp.is_available():
-                        _video_backend = _vp.display_name
-                        break
-                except Exception:
-                    continue
-        except Exception:
-            _video_backend = None
-        if _video_backend:
-            tool_status.append((f"Video Generation ({_video_backend})", True, None))
-
+    # Modal Execution
     if subscription_features.modal.managed_by_nous:
         tool_status.append(("Modal Execution (Nous subscription)", True, None))
     elif cfg_get(config, "terminal", "backend") == "modal":
@@ -539,19 +517,6 @@ def _print_setup_summary(config: dict, hermes_home):
             tool_status.append(("Modal Execution", False, "run 'hermes setup terminal'"))
     elif managed_nous_tools_enabled() and subscription_features.nous_auth_present:
         tool_status.append(("Modal Execution (optional via Nous subscription)", True, None))
-
-    # Home Assistant
-    if get_env_value("HASS_TOKEN"):
-        tool_status.append(("Smart Home (Home Assistant)", True, None))
-
-    # Spotify (OAuth via hermes auth spotify — check auth.json, not env vars)
-    try:
-        from hermes_cli.auth import get_provider_auth_state
-        _spotify_state = get_provider_auth_state("spotify") or {}
-        if _spotify_state.get("access_token") or _spotify_state.get("refresh_token"):
-            tool_status.append(("Spotify (PKCE OAuth)", True, None))
-    except Exception:
-        pass
 
     # Skills Hub
     if get_env_value("GITHUB_TOKEN"):
@@ -2752,10 +2717,8 @@ def run_setup_wizard(args):
     if not is_existing:
         _apply_default_agent_settings(config)
 
-    # Section 3b: Auto-detect environment, auto-enable Langfuse, smart routing.
+    # Section 3b: Auto-detect environment, smart routing.
     _detected = _auto_detect_environment()
-    if _detected["langfuse"]:
-        _auto_enable_langfuse(config)
     if not is_existing:
         config.setdefault("smart_model_routing", {})["enabled"] = True
         # Agent preset selection for first-time users.
@@ -2782,12 +2745,11 @@ def run_setup_wizard(args):
 def _auto_detect_environment() -> dict:
     """Auto-detect available API keys and environment features.
 
-    Returns a dict with detected provider keys, langfuse availability, and
+    Returns a dict with detected provider keys and
     workspace context. Used by the setup wizard to skip unnecessary prompts.
     """
     detected = {
         "providers": {},
-        "langfuse": False,
         "is_workspace": False,
     }
 
@@ -2810,34 +2772,12 @@ def _auto_detect_environment() -> dict:
         if val:
             detected["providers"][provider_id] = env_var
 
-    # Check for Langfuse keys.
-    if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY"):
-        detected["langfuse"] = True
-
     # Check if cwd is a workspace (git repo or has project files).
     cwd = Path.cwd()
     if (cwd / ".git").exists() or (cwd / "package.json").exists() or (cwd / "pyproject.toml").exists():
         detected["is_workspace"] = True
 
     return detected
-
-
-def _auto_enable_langfuse(config: dict) -> bool:
-    """Auto-enable Langfuse telemetry if keys are detected in environment.
-
-    Returns True if Langfuse was enabled, False otherwise.
-    """
-    if not (os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY")):
-        return False
-
-    langfuse_cfg = config.setdefault("langfuse", {})
-    if langfuse_cfg.get("enabled"):
-        return False  # already enabled
-
-    langfuse_cfg["enabled"] = True
-    print_info("  Langfuse telemetry auto-enabled (keys detected in environment).")
-    print_info("  Disable with: hermes config set langfuse.enabled false")
-    return True
 
 
 def _prompt_agent_preset(config: dict) -> None:
@@ -2935,10 +2875,8 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
     # Step 3: Apply defaults for everything else
     _apply_default_agent_settings(config)
 
-    # Step 3b: Auto-detect environment and auto-enable features.
+    # Step 3b: Auto-detect environment.
     _detected = _auto_detect_environment()
-    if _detected["langfuse"]:
-        _auto_enable_langfuse(config)
 
     # Step 3c: Smart model routing — enabled for first-time setup.
     config.setdefault("smart_model_routing", {})["enabled"] = True

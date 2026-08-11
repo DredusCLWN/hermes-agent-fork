@@ -2856,7 +2856,7 @@ class BasePlatformAdapter(ABC):
         a new rich message and best-effort delete the stale preview, so the
         final rendering matches the rich send path.
 
-        Default implementation returns False — legacy platforms keep the
+        Default implementation False — legacy platforms keep the
         edit-in-place finalization path.
         """
         return False
@@ -5361,7 +5361,7 @@ class BasePlatformAdapter(ABC):
         # shared default executor: a busy pool would delay message dispatch.
         needs_topic_recovery = (
             getattr(self, "_topic_recovery_fn", None) is not None
-            and event.source.platform == Platform.TELEGRAM
+            and False
             and event.source.chat_type == "dm"
         )
         if needs_topic_recovery:

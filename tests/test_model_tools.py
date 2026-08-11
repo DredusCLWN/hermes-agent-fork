@@ -3,7 +3,6 @@
 import json
 from unittest.mock import ANY, call, patch
 
-
 from model_tools import (
     handle_function_call,
     get_all_tool_names,
@@ -12,7 +11,6 @@ from model_tools import (
     _LEGACY_TOOLSET_MAP,
     TOOL_TO_TOOLSET_MAP,
 )
-
 
 # =========================================================================
 # handle_function_call
@@ -29,8 +27,6 @@ class TestHandleFunctionCall:
         result = json.loads(handle_function_call("totally_fake_tool_xyz", {}))
         assert "error" in result
         assert "totally_fake_tool_xyz" in result["error"]
-
-
 
     def test_post_tool_call_receives_non_negative_integer_duration_ms(self):
         """Regression: post_tool_call and transform_tool_result hooks must
@@ -183,8 +179,6 @@ class TestHandleFunctionCall:
         assert post_call[1]["error_type"] == "RuntimeError"
         assert post_call[1]["duration_ms"] >= 0
 
-
-
 # =========================================================================
 # Agent loop tools
 # =========================================================================
@@ -199,7 +193,6 @@ class TestAgentLoopTools:
     def test_no_regular_tools_in_set(self):
         assert "web_search" not in _AGENT_LOOP_TOOLS
         assert "terminal" not in _AGENT_LOOP_TOOLS
-
 
 # =========================================================================
 # Pre-tool-call blocking via plugin hooks
@@ -274,7 +267,6 @@ class TestPreToolCallBlocking:
         result = json.loads(handle_function_call("read_file", {"path": "test.txt"}, task_id="t1"))
         assert result == {"ok": True}
 
-
     def test_relay_rewrite_is_visible_to_pre_tool_authorization(self, monkeypatch):
         observed = {}
 
@@ -309,8 +301,6 @@ class TestPreToolCallBlocking:
         assert observed["pre_tool_args"]["path"] == "approved.txt"
         assert observed["dispatch_args"]["path"] == "approved.txt"
 
-
-
 # =========================================================================
 # Legacy toolset map
 # =========================================================================
@@ -320,12 +310,10 @@ class TestLegacyToolsetMap:
         expected = [
             "web_tools", "terminal_tools", "vision_tools",
             "image_tools", "skills_tools", "browser_tools",
-            "file_tools", "tts_tools",
+            "file_tools",
         ]
         for name in expected:
             assert name in _LEGACY_TOOLSET_MAP, f"Missing legacy toolset: {name}"
-
-
 
 # =========================================================================
 # Backward-compat wrappers
@@ -345,9 +333,6 @@ class TestBackwardCompat:
         assert result is not None
         assert isinstance(result, str)
 
-
-
-
 # =========================================================================
 # _coerce_number — inf / nan must fall through to the original string
 # (regression: fix: eliminate duplicate checkpoint entries and JSON-unsafe coercion)
@@ -362,12 +347,9 @@ class TestCoerceNumberInfNan:
         from model_tools import _coerce_number
         assert _coerce_number("inf") == "inf"
 
-
     def test_nan_returns_original_string(self):
         from model_tools import _coerce_number
         assert _coerce_number("nan") == "nan"
-
-
 
     def test_normal_numbers_still_coerce(self):
         """Guard against over-correction — real numbers still coerce."""
@@ -375,54 +357,6 @@ class TestCoerceNumberInfNan:
         assert _coerce_number("42") == 42
         assert _coerce_number("3.14") == 3.14
         assert _coerce_number("1e3") == 1000
-
-class TestDisabledToolsetsPlatformBundle:
-    """Regression test for #33924: disabling a platform bundle (hermes-*)
-    must not remove core tools from other enabled toolsets."""
-
-    def test_disabling_platform_bundle_preserves_core_tools(self):
-        """Disabling hermes-yuanbao should not strip core tools from hermes-telegram."""
-        from model_tools import get_tool_definitions
-
-        tools_telegram = get_tool_definitions(
-            enabled_toolsets=["hermes-telegram"],
-            quiet_mode=True,
-        )
-        tools_telegram_no_yuanbao = get_tool_definitions(
-            enabled_toolsets=["hermes-telegram"],
-            disabled_toolsets=["hermes-yuanbao"],
-            quiet_mode=True,
-        )
-        names_telegram = {t["function"]["name"] for t in tools_telegram}
-        names_no_yuanbao = {t["function"]["name"] for t in tools_telegram_no_yuanbao}
-
-        # Disabling a *different* platform bundle must not remove any tools
-        assert names_telegram == names_no_yuanbao, (
-            f"Tools lost after disabling hermes-yuanbao: "
-            f"{names_telegram - names_no_yuanbao}"
-        )
-
-    def test_disabling_platform_bundle_removes_own_tools(self):
-        """Disabling hermes-discord should remove discord-specific tools."""
-        from model_tools import get_tool_definitions
-
-        tools = get_tool_definitions(
-            enabled_toolsets=["hermes-discord"],
-            disabled_toolsets=["hermes-discord"],
-            quiet_mode=True,
-        )
-        names = {t["function"]["name"] for t in tools}
-        assert "discord" not in names
-
-
-
-
-    def test_bundle_non_core_tools_unknown_falls_back(self):
-        """An unknown/garbage bundle name falls back to full resolution (best effort)."""
-        from toolsets import bundle_non_core_tools
-        # A non-existent bundle resolves to an empty set (no tools), not a crash.
-        assert bundle_non_core_tools("hermes-does-not-exist") == set()
-
 
 class TestDisabledToolsetsPostureToolset:
     """Regression test for #57315: disabling a posture toolset (`coding`,

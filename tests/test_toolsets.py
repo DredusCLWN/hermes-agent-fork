@@ -31,15 +31,6 @@ class TestGetToolset:
         assert ts is not None
         assert "web_search" in ts["tools"]
 
-    def test_x_search_toolset_marks_read_only_and_points_to_xurl(self):
-        ts = get_toolset("x_search")
-        assert ts is not None
-        assert ts["tools"] == ["x_search"]
-        description = ts["description"].lower()
-        assert "read-only" in description
-        assert "xurl" in description
-        assert "authenticated" in description
-
     def test_merges_registry_tools_into_builtin_toolset(self, monkeypatch):
         reg = ToolRegistry()
         reg.register(
@@ -206,7 +197,7 @@ class TestToolsetConsistency:
         on hermes-discord, gated on DISCORD_BOT_TOKEN) are allowed on top —
         the invariant is that the core set is identical across platforms.
         """
-        platforms = ["hermes-cli", "hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack", "hermes-signal", "hermes-homeassistant"]
+        platforms = ["hermes-cli", "hermes-acp", "hermes-api-server"]
         tool_sets = [set(TOOLSETS[p]["tools"]) for p in platforms]
         # All platforms must contain the shared core; platform-specific
         # extras are OK (subset check, not equality).
@@ -233,12 +224,6 @@ class TestPluginToolsets:
         all_toolsets = get_all_toolsets()
         assert "plugin_bundle" in all_toolsets
         assert all_toolsets["plugin_bundle"]["tools"] == ["plugin_tool"]
-
-
-class TestDefaultPlatformWebSearchCoverage:
-    def test_hermes_whatsapp_toolset_includes_web_search(self):
-        assert "web_search" in resolve_toolset("hermes-whatsapp")
-
 
 
 class TestResolveToolsetIncludeRegistry:

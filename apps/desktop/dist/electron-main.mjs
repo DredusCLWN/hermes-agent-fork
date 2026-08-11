@@ -13978,7 +13978,7 @@ if (USER_DATA_OVERRIDE) {
   app.setPath("userData", resolvedUserData);
 }
 var DEV_SERVER = process.env.HERMES_DESKTOP_DEV_SERVER;
-var IS_PACKAGED = app.isPackaged || Boolean(true);
+var IS_PACKAGED = app.isPackaged || Boolean(process.env.HERMES_DESKTOP_IS_PACKAGED);
 var IS_MAC = process.platform === "darwin";
 var IS_WINDOWS3 = process.platform === "win32";
 var IS_WSL = isWslEnvironment();

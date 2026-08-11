@@ -5218,9 +5218,6 @@ _PLATFORMS = [
     # Telegram moved to plugins/platforms/telegram/ — setup metadata discovered
     # dynamically via the platform registry entry registered by
     # plugins/platforms/telegram/adapter.py::register(). #41112.
-    # Discord moved to plugins/platforms/discord/ — its setup metadata is
-    # discovered dynamically via _all_platforms() from the platform registry
-    # entry registered by plugins/platforms/discord/adapter.py::register().
     # Slack moved to plugins/platforms/slack/ for the same reason — its setup
     # metadata is discovered dynamically via the platform registry entry
     # registered by plugins/platforms/slack/adapter.py::register(). #41112.
@@ -5374,32 +5371,6 @@ _PLATFORMS = [
                 "prompt": "Home channel (user/group OpenID for cron delivery, or empty)",
                 "password": False,
                 "help": "OpenID to deliver cron results and notifications to.",
-            },
-        ],
-    },
-    {
-        "key": "yuanbao",
-        "label": "Yuanbao",
-        "emoji": "💎",
-        "token_var": "YUANBAO_APP_ID",
-        "setup_instructions": [
-            "1. Download the Yuanbao app from https://yuanbao.tencent.com/",
-            "2. In the app, go to PAI → My Bot and create a new bot",
-            "3. After the bot is created, copy the App ID and App Secret",
-            "4. Enter them below and Hermes will connect automatically over WebSocket",
-        ],
-        "vars": [
-            {
-                "name": "YUANBAO_APP_ID",
-                "prompt": "App ID",
-                "password": False,
-                "help": "The App ID from your Yuanbao IM Bot credentials.",
-            },
-            {
-                "name": "YUANBAO_APP_SECRET",
-                "prompt": "App Secret",
-                "password": True,
-                "help": "The App Secret (used for HMAC signing) from your Yuanbao IM Bot.",
             },
         ],
     },
@@ -5614,7 +5585,7 @@ def _set_platform_unauthorized_dm_behavior(platform_key: str, behavior: str) -> 
 
 
 def _setup_standard_platform(platform: dict):
-    """Interactive setup for Telegram, Discord, or Slack."""
+    """Interactive setup for Telegram or Slack."""
     # Same hidden-knob list the dashboard/Desktop channel cards use.
     from hermes_cli.setup_hidden_env import is_setup_hidden_env as _is_setup_hidden_env
 
@@ -5722,18 +5693,6 @@ def _setup_standard_platform(platform: dict):
             value = prompt(f"  {var['prompt']}", password=False)
             if value:
                 cleaned = value.replace(" ", "")
-                # For Discord, strip common prefixes (user:123, <@123>, <@!123>)
-                if "DISCORD" in var["name"]:
-                    parts = []
-                    for uid in cleaned.split(","):
-                        uid = uid.strip()
-                        if uid.startswith("<@") and uid.endswith(">"):
-                            uid = uid.lstrip("<@!").rstrip(">")
-                        if uid.lower().startswith("user:"):
-                            uid = uid[5:]
-                        if uid:
-                            parts.append(uid)
-                    cleaned = ",".join(parts)
                 save_env_value(var["name"], cleaned)
                 print_success("  Saved — only these users can interact with the bot.")
                 allowed_val_set = cleaned
@@ -6330,9 +6289,6 @@ def _builtin_setup_fn(key: str):
     return {
         # telegram moved into the plugin: setup_fn registered by
         # plugins/platforms/telegram/adapter.py::register(). #41112.
-        # discord moved into the plugin: setup_fn is registered by
-        # plugins/platforms/discord/adapter.py::register() and dispatched
-        # via the plugin path in _configure_platform().
         # slack moved into the plugin: setup_fn is registered by
         # plugins/platforms/slack/adapter.py::register() and dispatched
         # via the plugin path in _configure_platform(). #41112.
@@ -6349,8 +6305,6 @@ def _builtin_setup_fn(key: str):
         # plugins/platforms/{whatsapp,dingtalk}/adapter.py::register() and
         # dispatched via the plugin path in _configure_platform(). #41112.
         "weixin": _setup_weixin,
-        # feishu moved into the plugin: setup_fn registered by
-        # plugins/platforms/feishu/adapter.py::register(). #41112.
         # wecom moved into the plugin: setup_fn registered by
         # plugins/platforms/wecom/adapter.py::register(). #41112.
         "qqbot": _setup_qqbot,
