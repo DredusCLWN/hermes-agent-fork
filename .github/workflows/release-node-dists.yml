@@ -48,8 +48,9 @@ jobs:
       - name: Package dists
         run: |
           mkdir -p release-assets
-          cd hermes_cli && zip -r ../release-assets/web-dist.zip web_dist
-          cd ../ui-tui && zip -r ../release-assets/ui-tui-dist.zip dist
+          # Git for Windows bash ships no zip.exe — use PowerShell Compress-Archive.
+          powershell -NoProfile -Command "Compress-Archive -Path 'hermes_cli\web_dist' -DestinationPath 'release-assets\web-dist.zip' -Force"
+          powershell -NoProfile -Command "Compress-Archive -Path 'ui-tui\dist' -DestinationPath 'release-assets\ui-tui-dist.zip' -Force"
         shell: bash
 
       - name: Publish to the tag's GitHub Release
