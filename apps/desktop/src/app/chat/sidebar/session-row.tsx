@@ -4,7 +4,7 @@ import type * as React from 'react'
 
 import { ProfileTag } from '@/app/chat/profile-tag'
 import { startSessionDrag } from '@/app/chat/session-drag'
-import { PlatformAvatar } from '@/app/messaging/platform-icon'
+
 import { openSession } from '@/app/open-session'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
@@ -231,11 +231,9 @@ function SidebarSessionRowImpl({
           )}
           {handoffSource && handoffLabel ? (
             <Tip label={r.handoffOrigin(handoffLabel)}>
-              <PlatformAvatar
-                className="size-4 rounded-[4px] text-[0.5rem] [&_svg]:size-2.5"
-                platformId={handoffSource}
-                platformName={handoffLabel}
-              />
+<span className="flex size-4 shrink-0 items-center justify-center rounded-[4px] bg-foreground/10 text-foreground/70">
+                <Codicon name="globe" className="size-2.5" />
+              </span>
             </Tip>
           ) : null}
           <SidebarRowLabel className="flex-1 font-normal group-hover:text-foreground group-data-[working=true]:text-foreground/90">

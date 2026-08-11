@@ -5,7 +5,7 @@ import type * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router'
 
-import { PlatformAvatar } from '@/app/messaging/platform-icon'
+
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -1492,11 +1492,9 @@ export function ChatSidebar({
                     key={group.sourceId}
                     label={group.label}
                     labelIcon={
-                      <PlatformAvatar
-                        className="size-4 rounded-[4px] text-[0.5625rem] [&_svg]:size-3"
-                        platformId={group.sourceId}
-                        platformName={group.label}
-                      />
+<span className="flex size-4 shrink-0 items-center justify-center rounded-[4px] bg-foreground/10 text-foreground/70">
+                        <Codicon name="globe" className="size-3" />
+                      </span>
                     }
                     onArchiveSession={onArchiveSession}
                     onDeleteSession={onDeleteSession}

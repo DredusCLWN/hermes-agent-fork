@@ -174,14 +174,11 @@ describe('SidebarSessionRow', () => {
       />
     )
 
-    // PlatformAvatar is the REAL component here (see the note above the vi.mock
-    // block, #67500 third pass) — it renders the Telegram brand SVG rather
-    // than the platform name as text, so query the avatar span itself (the
-    // row's only aria-hidden span in this state) rather than text content,
-    // and confirm its tooltip trigger actually attaches to it — proving the
-    // real forwardRef/...rest path works, not a mock that fakes it.
-    const avatar = container.querySelector('span[aria-hidden="true"]')
-    expect(avatar).toBeTruthy()
-    expect(tipTrigger(avatar as HTMLElement)).toBeTruthy()
+    // The handoff badge is a generic globe icon now (Codicon <i>) — platform-
+    // brand avatars were removed with the messaging layer. The Tip tooltip
+    // trigger attaches to the icon's span wrapper.
+    const icon = container.querySelector('i.codicon-globe')
+    expect(icon).toBeTruthy()
+    expect(tipTrigger(icon!.parentElement as HTMLElement)).toBeTruthy()
   })
 })

@@ -102,9 +102,6 @@ CONFIGURABLE_TOOLSETS = [
     ("vision",          "👁️  Vision / Image Analysis",  "vision_analyze"),
     ("video",           "🎬 Video Analysis",            "video_analyze (requires video-capable model)"),
     ("image_gen",       "🎨 Image Generation",          "image_generate"),
-    ("video_gen",       "🎬 Video Generation",          "video_generate (text/image/reference)"),
-    ("bfl",             "🎬 BFL FLUX 3 Video",          "bfl_flux3_*"),
-    ("x_search",        "🐦 X (Twitter) Search",        "x_search (requires xAI OAuth or XAI_API_KEY)"),
     ("skills",          "📚 Skills",                    "list, view, manage"),
     ("todo",            "📋 Task Planning",             "todo"),
     ("memory",          "💾 Memory",                    "persistent memory across sessions"),
@@ -113,13 +110,14 @@ CONFIGURABLE_TOOLSETS = [
     ("clarify",         "❓ Clarifying Questions",      "clarify"),
     ("delegation",      "👥 Task Delegation",           "delegate_task"),
     ("cronjob",         "⏰ Cron Jobs",                 "create/list/update/pause/resume/run, with optional attached skills"),
-    ("homeassistant",    "🏠 Home Assistant",           "smart home device control"),
-    ("spotify",          "🎵 Spotify",                  "playback, search, playlists, library"),
-    ("discord",         "💬 Discord (read/participate)", "fetch messages, search members, create thread"),
-    ("discord_admin",   "🛡️  Discord Server Admin",    "list channels/roles, pin, assign roles"),
-    ("yuanbao",          "🤖 Yuanbao",                  "group info, member queries, DM"),
     ("computer_use",     "🖱️  Computer Use (macOS/Windows/Linux)", "background desktop control via cua-driver"),
 ]
+
+        # All social/messaging platforms were removed from the fork; toolset
+
+# All social/messaging platforms were removed from the fork; toolset
+# placement is platform-agnostic now.
+_TOOLSET_PLATFORM_RESTRICTIONS: Dict[str, Set[str]] = {}
 
 
 def gui_toolset_label(label: str) -> str:
@@ -147,11 +145,7 @@ def gui_toolset_label(label: str) -> str:
 #
 # X search is off by default for users without xAI credentials, but
 # auto-enables when SuperGrok OAuth tokens are stored OR XAI_API_KEY is
-# set — mirroring the HASS_TOKEN → homeassistant auto-enable below. The
-# `hermes tools` → X (Twitter) Search setup walks users through credential
-# setup. The tool's check_fn means the schema still won't appear to the
-# model if the credential later goes missing or expires.
-_DEFAULT_OFF_TOOLSETS = {"homeassistant", "spotify", "discord", "discord_admin", "video", "video_gen", "x_search", "a2a"}
+_DEFAULT_OFF_TOOLSETS = {"video"}
 
 
 # Config-only capabilities: they appear in `hermes tools` for provider/API-key
@@ -161,60 +155,6 @@ _DEFAULT_OFF_TOOLSETS = {"homeassistant", "spotify", "discord", "discord_admin",
 # per-platform enable/disable checklist; configured via the "Reconfigure an
 # existing tool" flow and the GUI provider matrix instead.
 _CONFIG_ONLY_TOOLSETS = set()
-
-
-def _xai_credentials_present() -> bool:
-    """Cheap, side-effect-free check for usable xAI credentials.
-
-    Used to auto-enable the ``x_search`` toolset when the user has either
-    completed xAI Grok OAuth (SuperGrok / Premium+) or set
-    ``XAI_API_KEY``. Does NOT hit the network — only inspects the local
-    auth store and environment. The tool's runtime ``check_fn`` still
-    gates schema registration if creds later expire or get revoked.
-    Also reused by ``provider_readiness_status`` for ``post_setup:
-    "xai_grok"`` picker rows (Grok OAuth x_search).
-    """
-    try:
-        from hermes_cli.auth import _read_xai_oauth_tokens
-
-        _read_xai_oauth_tokens()
-        return True
-    except Exception:
-        pass
-    try:
-        from tools.xai_http import get_env_value as _xai_get_env_value
-
-        if str(_xai_get_env_value("XAI_API_KEY") or "").strip():
-            return True
-    except Exception:
-        pass
-    try:
-        from agent.secret_scope import get_secret
-    except ImportError:  # pragma: no cover — secret_scope is in-repo
-        return bool(str(os.environ.get("XAI_API_KEY") or "").strip())
-    return bool(str(get_secret("XAI_API_KEY") or "").strip())
-
-
-def _homeassistant_credentials_present() -> bool:
-    """Return whether the active profile has a Home Assistant token."""
-    try:
-        from agent.secret_scope import get_secret
-
-        return bool((get_secret("HASS_TOKEN", "") or "").strip())
-    except Exception:
-        return False
-
-# Platform-scoped toolsets: only appear in the `hermes tools` checklist for
-# these platforms, and only resolve/save for these platforms.  A toolset
-# absent from this map is available on every platform (current behaviour).
-#
-# Use this for tools whose APIs only make sense on one platform (Discord
-# server admin, Slack workspace admin, etc.).  Keeps every other platform's
-# checklist from filling up with irrelevant toggles.
-_TOOLSET_PLATFORM_RESTRICTIONS: Dict[str, Set[str]] = {
-    "discord": {"discord"},
-    "discord_admin": {"discord"},
-}
 
 
 def _toolset_allowed_for_platform(ts_key: str, platform: str) -> bool:
@@ -379,65 +319,6 @@ TOOL_CATEGORIES = {
             },
         ],
     },
-    "video_gen": {
-        "name": "Video Generation",
-        "icon": "🎬",
-        # "Nous Subscription" row mirrors the image_gen pattern — managed
-        # FAL video generation billed via the Nous Portal.  Plugin-backed
-        # provider rows (FAL BYOK, xAI, …) are injected at runtime by
-        # ``_plugin_video_gen_providers()`` in ``_visible_providers``.
-        "providers": [
-            {
-                "name": "Nous Subscription",
-                "badge": "subscription",
-                "tag": "Managed FAL video generation billed to your subscription",
-                "env_vars": [],
-                "requires_nous_auth": True,
-                "managed_nous_feature": "video_gen",
-                "override_env_vars": ["FAL_KEY"],
-                # The underlying plugin backend — when the user picks
-                # "Nous Subscription" we set video_gen.provider = "fal"
-                # and video_gen.use_gateway = True so the FAL plugin
-                # routes through the managed queue gateway.
-                "video_gen_plugin_name": "fal",
-            },
-        ],
-    },
-    "x_search": {
-        "name": "X (Twitter) Search",
-        "setup_title": "Select xAI Credential Source",
-        "setup_note": (
-            "Hermes routes X searches through xAI's built-in x_search "
-            "Responses tool for read-only public X discovery. Use the xurl "
-            "skill for authenticated X API reads and account actions. Both "
-            "credential sources hit the same "
-            "https://api.x.ai/v1/responses endpoint — pick whichever you "
-            "already have. SuperGrok OAuth is preferred when both are set "
-            "(uses your subscription quota instead of API spend)."
-        ),
-        "icon": "🐦",
-        "providers": [
-            {
-                "name": "xAI Grok OAuth (SuperGrok / Premium+)",
-                "badge": "subscription",
-                "tag": "Browser login at accounts.x.ai — no API key required",
-                "env_vars": [],
-                "post_setup": "xai_grok",
-            },
-            {
-                "name": "xAI API key",
-                "badge": "paid",
-                "tag": "Direct xAI API billing via XAI_API_KEY",
-                "env_vars": [
-                    {
-                        "key": "XAI_API_KEY",
-                        "prompt": "xAI API key",
-                        "url": "https://console.x.ai/",
-                    },
-                ],
-            },
-        ],
-    },
     "browser": {
         "name": "Browser Automation",
         "icon": "🌐",
@@ -493,32 +374,6 @@ TOOL_CATEGORIES = {
             },
         ],
     },
-    "homeassistant": {
-        "name": "Smart Home",
-        "icon": "🏠",
-        "providers": [
-            {
-                "name": "Home Assistant",
-                "tag": "REST API integration",
-                "env_vars": [
-                    {"key": "HASS_TOKEN", "prompt": "Home Assistant Long-Lived Access Token"},
-                    {"key": "HASS_URL", "prompt": "Home Assistant URL", "default": "http://homeassistant.local:8123"},
-                ],
-            },
-        ],
-    },
-    "spotify": {
-        "name": "Spotify",
-        "icon": "🎵",
-        "providers": [
-            {
-                "name": "Spotify Web API",
-                "tag": "PKCE OAuth — opens the setup wizard",
-                "env_vars": [],
-                "post_setup": "spotify",
-            },
-        ],
-    },
     "computer_use": {
         "name": "Computer Use (macOS/Windows/Linux)",
         "icon": "🖱️",
@@ -540,31 +395,6 @@ TOOL_CATEGORIES = {
                     # version-pin env var.
                 ],
                 "post_setup": "cua_driver",
-            },
-        ],
-    },
-    "langfuse": {
-        "name": "Langfuse Observability",
-        "icon": "📊",
-        "providers": [
-            {
-                "name": "Langfuse Cloud",
-                "tag": "Hosted Langfuse (cloud.langfuse.com)",
-                "env_vars": [
-                    {"key": "HERMES_LANGFUSE_PUBLIC_KEY", "prompt": "Langfuse public key (pk-lf-...)", "url": "https://cloud.langfuse.com"},
-                    {"key": "HERMES_LANGFUSE_SECRET_KEY", "prompt": "Langfuse secret key (sk-lf-...)", "url": "https://cloud.langfuse.com"},
-                ],
-                "post_setup": "langfuse",
-            },
-            {
-                "name": "Langfuse Self-Hosted",
-                "tag": "Self-hosted Langfuse instance",
-                "env_vars": [
-                    {"key": "HERMES_LANGFUSE_PUBLIC_KEY", "prompt": "Langfuse public key (pk-lf-...)"},
-                    {"key": "HERMES_LANGFUSE_SECRET_KEY", "prompt": "Langfuse secret key (sk-lf-...)"},
-                    {"key": "HERMES_LANGFUSE_BASE_URL", "prompt": "Langfuse server URL (e.g. http://localhost:3000)", "default": "http://localhost:3000"},
-                ],
-                "post_setup": "langfuse",
             },
         ],
     },
@@ -1646,84 +1476,62 @@ def _run_post_setup(post_setup_key: str):
 
     elif post_setup_key == "scrapling":
         try:
-            __import__("scrapling")
-            _print_success("    scrapling is already installed")
+            from scrapling.fetchers import Fetcher  # noqa: F401
+            _print_success("    scrapling[fetchers] is already installed")
         except ImportError:
-            _print_info("    Installing scrapling (anti-bot web extraction)...")
+            _print_info("    Installing scrapling[fetchers] (anti-bot web extraction)...")
+
             try:
-                result = _pip_install(["-U", "scrapling", "--quiet"], timeout=300)
+                result = _pip_install(["-U", "scrapling[fetchers]", "--quiet"], timeout=300)
                 if result.returncode == 0:
-                    _print_success("    scrapling installed")
+                    _print_success("    scrapling[fetchers] installed")
                 else:
                     _print_warning("    scrapling install failed:")
                     _print_info(f"      {(result.stderr or '').strip()[:300]}")
-                    _print_info("    Run manually: uv pip install -U scrapling")
+                    _print_info("    Run manually: uv pip install -U 'scrapling[fetchers]'")
                     return
             except subprocess.TimeoutExpired:
                 _print_warning("    scrapling install timed out (>5min)")
-                _print_info("    Run manually: uv pip install -U scrapling")
+                _print_info("    Run manually: uv pip install -U 'scrapling[fetchers]'")
                 return
+        _print_info("    Downloading browser binaries for StealthyFetcher...")
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "scrapling", "install"],
+                capture_output=True, text=True, timeout=300,
+            )
+            if result.returncode == 0:
+                _print_success("    scrapling browser binaries installed")
+            else:
+                _print_warning("    scrapling install (browsers) failed:")
+                _print_info(f"      {(result.stderr or '').strip()[:300]}")
+                _print_info("    Run manually: scrapling install")
+        except subprocess.TimeoutExpired:
+            _print_warning("    Browser install timed out (>5min)")
+            _print_info("    Run manually: scrapling install")
+        except Exception as exc:  # noqa: BLE001
+            _print_warning(f"    Browser install error: {exc}")
+            _print_info("    Run manually: scrapling install")
+        _print_info("    Installing patchright chromium for StealthyFetcher anti-bot...")
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "patchright", "install", "chromium"],
+                capture_output=True, text=True, timeout=300,
+            )
+            if result.returncode == 0:
+                _print_success("    patchright chromium installed")
+            else:
+                _print_warning("    patchright install failed:")
+                _print_info(f"      {(result.stderr or '').strip()[:300]}")
+                _print_info("    Run manually: python -m patchright install chromium")
+        except subprocess.TimeoutExpired:
+            _print_warning("    patchright install timed out (>5min)")
+            _print_info("    Run manually: python -m patchright install chromium")
+        except Exception as exc:  # noqa: BLE001
+            _print_warning(f"    patchright install error: {exc}")
+            _print_info("    Run manually: python -m patchright install chromium")
         _print_info("    No API key required. Bypasses Cloudflare, renders JS, returns clean text.")
         _print_info("    Pair with ddgs or brave_free for search.")
-
-    elif post_setup_key == "spotify":
-        # Run the full `hermes auth spotify` flow — if the user has no
-        # client_id yet, this drops them into the interactive wizard
-        # (opens the Spotify dashboard, prompts for client_id, persists
-        # to ~/.hermes/.env), then continues straight into PKCE. If they
-        # already have an app, it skips the wizard and just does OAuth.
-        from types import SimpleNamespace
-        try:
-            from hermes_cli.auth import login_spotify_command
-        except Exception as exc:
-            _print_warning(f"    Could not load Spotify auth: {exc}")
-            _print_info("    Run manually: hermes auth spotify")
-            return
-        _print_info("    Starting Spotify login...")
-        try:
-            login_spotify_command(SimpleNamespace(
-                client_id=None, redirect_uri=None, scope=None,
-                no_browser=False, timeout=None,
-            ))
-            _print_success("    Spotify authenticated")
-        except SystemExit as exc:
-            # User aborted the wizard, or OAuth failed — don't fail the
-            # toolset enable; they can retry with `hermes auth spotify`.
-            _print_warning(f"    Spotify login did not complete: {exc}")
-            _print_info("    Run later: hermes auth spotify")
-        except Exception as exc:
-            _print_warning(f"    Spotify login failed: {exc}")
-            _print_info("    Run manually: hermes auth spotify")
-
-    elif post_setup_key == "langfuse":
-        # Install the langfuse SDK.
-        try:
-            __import__("langfuse")
-            _print_success("    langfuse SDK already installed")
-        except ImportError:
-            _print_info("    Installing langfuse SDK...")
-            result = _pip_install(["langfuse", "--quiet"], timeout=120)
-            if result.returncode == 0:
-                _print_success("    langfuse SDK installed")
-            else:
-                _print_warning("    langfuse SDK install failed — run manually: uv pip install langfuse")
-        # Opt the bundled observability/langfuse plugin into plugins.enabled.
-        # The plugin ships in the repo but doesn't load until the user enables
-        # it (standalone plugins are opt-in).
-        try:
-            from hermes_cli.plugins_cmd import _get_enabled_set, _save_enabled_set
-            enabled = _get_enabled_set()
-            if "observability/langfuse" in enabled or "langfuse" in enabled:
-                _print_success("    Plugin observability/langfuse already enabled")
-            else:
-                enabled.add("observability/langfuse")
-                _save_enabled_set(enabled)
-                _print_success("    Plugin observability/langfuse enabled")
-        except Exception as exc:
-            _print_warning(f"    Could not enable plugin automatically: {exc}")
-            _print_info("    Run manually: hermes plugins enable observability/langfuse")
-        _print_info("    Restart Hermes for tracing to take effect.")
-        _print_info("    Verify: hermes plugins list")
 
     elif post_setup_key == "xai_grok":
         # Shared credential bootstrap for any picker entry that talks to xAI
@@ -1812,8 +1620,7 @@ def valid_post_setup_keys() -> Set[str]:
     for builder in (
         _plugin_web_search_providers,
         _plugin_image_gen_providers,
-        _plugin_video_gen_providers,
-        _plugin_browser_providers,
+            _plugin_browser_providers,
     ):
         try:
             for prov in builder():
@@ -1862,8 +1669,6 @@ def _get_enabled_platforms() -> List[str]:
     enabled = ["cli"]
     if get_env_value("TELEGRAM_BOT_TOKEN"):
         enabled.append("telegram")
-    if get_env_value("DISCORD_BOT_TOKEN"):
-        enabled.append("discord")
     if get_env_value("SLACK_BOT_TOKEN"):
         enabled.append("slack")
     if get_env_value("WHATSAPP_ENABLED"):
@@ -1963,12 +1768,8 @@ def _exempt_explicit_platform_native(
 #: Landing late — or leaving an entry here for a second release — converts a
 #: back-fill into a stuck checkbox.
 #:
-#: Not gated on a Nous sign-in here: the six ``bfl_flux3_*`` tools carry
-#: ``check_fn=check_bfl_requirements``, so an enabled toolset still ships zero
-#: schemas to a user with no Nous credential — the same split Home Assistant
-#: uses. Probing the portal from this path would put a network call on every
-#: CLI start, gateway session and cron tick.
-_RECENTLY_SHIPPED_TOOLSETS = frozenset({"bfl"})
+#: Empty in this build — no recently-shipped toolsets.
+_RECENTLY_SHIPPED_TOOLSETS = frozenset()
 
 
 def _enable_recently_shipped_toolsets(
@@ -2053,12 +1854,10 @@ def _get_platform_tools(
             if ts in configurable_keys and _toolset_allowed_for_platform(ts, platform)
         }
         # Mixed config: composite toolset alongside configurables (e.g.
-        # ``[hermes-cli, spotify]`` after enabling Spotify via ``hermes
         # tools``). Without expansion the composite name is silently dropped,
         # leaving sessions with only the configurable opt-ins and no native
         # tools. Mirror the else-branch's subset inference, but apply
         # _DEFAULT_OFF_TOOLSETS only to the implicit expansion — anything the
-        # user explicitly listed (e.g. ``spotify``) must survive.
         composite_tools = set()
         for ts_name in toolset_names:
             if ts_name in configurable_keys or ts_name in plugin_ts_keys:
@@ -2083,8 +1882,6 @@ def _get_platform_tools(
             default_off = set(_DEFAULT_OFF_TOOLSETS)
             if platform in default_off and platform not in _TOOLSET_PLATFORM_RESTRICTIONS:
                 default_off.remove(platform)
-            if "homeassistant" in default_off and _homeassistant_credentials_present():
-                default_off.remove("homeassistant")
             _exempt_explicit_platform_native(
                 default_off, platform, explicitly_configured=explicitly_configured
             )
@@ -2113,45 +1910,20 @@ def _get_platform_tools(
             if ts_tools and ts_tools.issubset(all_tool_names):
                 enabled_toolsets.add(ts_key)
 
-        # Auto-enable ``x_search`` when xAI credentials are configured.
-        # Unlike ``homeassistant`` (whose ``ha_*`` tools live inside the
         # platform composite and thus pass the subset check above),
-        # ``x_search`` is its own one-tool toolset that the composite does
         # NOT include, so the subset loop never picks it up. Inject it
-        # directly here, mirroring the HASS_TOKEN → ``homeassistant`` rule
         # below: once you have working creds, you don't have to also click
         # through ``hermes tools`` to flip the toolset on. Only fires when
         # the user has not yet saved an explicit toolset list — once they
         # do, the saved list is authoritative.
-        x_search_auto_enabled = (
-            _toolset_allowed_for_platform("x_search", platform)
-            and _xai_credentials_present()
-        )
-        if x_search_auto_enabled:
-            enabled_toolsets.add("x_search")
 
         default_off = set(_DEFAULT_OFF_TOOLSETS)
         # Legacy safety: if the platform's own name matches a default-off
-        # toolset (e.g. `homeassistant` platform + `homeassistant` toolset),
         # keep that toolset enabled on first install.  Skip this dodge for
         # platform-restricted toolsets — those are always opt-in even on
         # their own platform (e.g. `discord` + `discord` should stay OFF).
         if platform in default_off and platform not in _TOOLSET_PLATFORM_RESTRICTIONS:
             default_off.remove(platform)
-        # Home Assistant is already runtime-gated by its check_fn (requires
-        # HASS_TOKEN to register any tools). When a user has configured
-        # HASS_TOKEN, they've explicitly opted in — don't also strip it via
-        # _DEFAULT_OFF_TOOLSETS, which would silently drop HA from platforms
-        # (e.g. cron) that run through _get_platform_tools without an
-        # explicit saved toolset list. Without this, Norbert's HA cron jobs
-        # regressed after #14798 made cron honor per-platform tool config.
-        if "homeassistant" in default_off and _homeassistant_credentials_present():
-            default_off.remove("homeassistant")
-        # Symmetric carve-out for x_search auto-enable (see the inject
-        # block above). Without this, the default_off subtraction would
-        # strip the entry we just added.
-        if x_search_auto_enabled and "x_search" in default_off:
-            default_off.remove("x_search")
         _exempt_explicit_platform_native(
             default_off, platform, explicitly_configured=explicitly_configured
         )
@@ -2197,9 +1969,7 @@ def _get_platform_tools(
             claimed.update(ts_tools)
 
     # Plugin toolsets: enabled by default unless explicitly disabled, or
-    # unless the toolset is in _DEFAULT_OFF_TOOLSETS (e.g. spotify —
     # shipped as a bundled plugin but user must opt in via `hermes tools`
-    # so we don't ship 7 Spotify tool schemas to users who don't use it).
     # A plugin toolset is "known" for a platform once `hermes tools`
     # has been saved for that platform (tracked via known_plugin_toolsets).
     # Unknown plugins default to enabled; known-but-absent = disabled.
@@ -2420,7 +2190,7 @@ def _toolset_has_keys(
         except Exception:
             return False
 
-    if ts_key in {"web", "image_gen", "video_gen", "browser"}:
+    if ts_key in {"web", "image_gen", "browser"}:
         if features is None:
             features = get_nous_subscription_features(
                 config, force_fresh=force_fresh
@@ -2633,54 +2403,7 @@ def _plugin_image_gen_providers() -> list[dict]:
     return rows
 
 
-def _plugin_video_gen_providers() -> list[dict]:
-    """Build picker-row dicts from plugin-registered video gen providers.
 
-    Mirrors ``_plugin_image_gen_providers`` exactly — every video backend
-    is a plugin, so this function is the *only* source of provider rows
-    for the Video Generation category. The hardcoded ``TOOL_CATEGORIES``
-    entry for ``video_gen`` keeps an empty providers list.
-    """
-    try:
-        from agent.video_gen_registry import list_providers
-        from hermes_cli.plugins import _ensure_plugins_discovered
-
-        _ensure_plugins_discovered()
-        providers = list_providers()
-    except Exception:
-        return []
-
-    rows: list[dict] = []
-    for provider in providers:
-        try:
-            schema = provider.get_setup_schema()
-        except Exception:
-            continue
-        if not isinstance(schema, dict):
-            continue
-        row = {
-            "name": schema.get("name", provider.display_name),
-            "badge": schema.get("badge", ""),
-            "tag": schema.get("tag", ""),
-            "env_vars": schema.get("env_vars", []),
-            "video_gen_plugin_name": provider.name,
-        }
-        if schema.get("post_setup"):
-            row["post_setup"] = schema["post_setup"]
-        rows.append(row)
-    return rows
-
-
-# Mirror of _plugin_image_gen_providers for web search backends. Surfaces
-# every plugin-registered web provider so it appears in the
-# "Web Search & Extract" picker. All seven providers (brave-free, ddgs,
-# searxng, exa, parallel, tavily, firecrawl) live as plugins after
-# PR #25182 — this helper is the sole source of truth for the category's
-# provider rows. The hardcoded entries that used to drive the category
-# were deleted in the same PR; only the two non-provider UX rows
-# ("Nous Subscription" managed-gateway entry, "Firecrawl Self-Hosted")
-# remain in TOOL_CATEGORIES because they describe alternative *setup
-# flows* for the firecrawl backend rather than distinct providers.
 def _plugin_web_search_providers() -> list[dict]:
     """Build picker-row dicts from plugin-registered web search providers.
 
@@ -2856,8 +2579,7 @@ def _visible_providers(
         # pool doesn't cover video, so showing it would only lead to a denial.
         if (
             pool_only
-            and provider.get("managed_nous_feature") == "video_gen"
-            and not (acct and acct.tool_gateway_entitled_for("fal-video"))
+                and not (acct and acct.tool_gateway_entitled_for("fal-video"))
         ):
             continue
         visible.append(provider)
@@ -2867,10 +2589,6 @@ def _visible_providers(
     if cat.get("name") == "Image Generation":
         visible.extend(_plugin_image_gen_providers())
 
-    # Inject plugin-registered video_gen backends. Unlike image_gen,
-    # video_gen has NO hardcoded providers — every backend is a plugin.
-    if cat.get("name") == "Video Generation":
-        visible.extend(_plugin_video_gen_providers())
 
     # Inject plugin-registered web search backends. After PR #25182, this
     # is the SOLE source of provider rows for the Web Search & Extract
@@ -2990,8 +2708,7 @@ _POST_SETUP_READY: dict = {
     "piper": lambda: _module_installed("piper"),
     "faster_whisper": lambda: _module_installed("faster_whisper"),
     "ddgs": lambda: _module_installed("ddgs"),
-    "scrapling": lambda: _module_installed("scrapling"),
-    "langfuse": lambda: _module_installed("langfuse"),
+    "scrapling": lambda: _module_installed("scrapling.fetchers"),
     "agent_browser": lambda: _agent_browser_installed(),
     "browserbase": lambda: _cloud_agent_browser_installed(),
     "camofox": lambda: _camofox_installed(),
@@ -3071,8 +2788,6 @@ def provider_readiness_status(
 
     post_setup = provider.get("post_setup")
     if post_setup:
-        if post_setup == "xai_grok":
-            return "ready" if _xai_credentials_present() else "needs_auth"
         predicate = _POST_SETUP_READY.get(post_setup)
         if predicate is not None:
             try:
@@ -3137,25 +2852,321 @@ def _toolset_needs_configuration_prompt(
         except Exception:
             pass
         return True
-    if ts_key == "video_gen":
-        # Satisfied when any plugin-registered video gen provider reports
-        # available — no in-tree fallback (every backend is a plugin).
+    if ts_key == "vision":
+        if _toolset_has_keys("vision"):
+            return
+        _configure_vision_backend()
+        return
+
+    requirements = TOOLSET_ENV_REQUIREMENTS.get(ts_key, [])
+    if not requirements:
+        return
+
+    missing = [(var, url) for var, url in requirements if not get_env_value(var)]
+    if not missing:
+        return
+
+    ts_label = next((l for k, l, _ in _get_effective_configurable_toolsets() if k == ts_key), ts_key)
+    print()
+    print(color(f"  {ts_label} requires configuration:", Colors.YELLOW))
+
+    for var, url in missing:
+        if url:
+            _print_info(f"  Get key at: {url}")
+        value = _prompt(f"    {var}", password=True)
+        if value and value.strip():
+            save_env_value(var, value.strip())
+            _print_success("    Saved")
+        else:
+            _print_warning("    Skipped")
+
+def _fal_model_catalog():
+    """Lazy-load the FAL model catalog from the tool module."""
+    from tools.image_generation_tool import FAL_MODELS, DEFAULT_MODEL
+    return FAL_MODELS, DEFAULT_MODEL
+
+
+IMAGEGEN_BACKENDS = {
+    "fal": {
+        "display": "FAL.ai",
+        "config_key": "image_gen",
+        "catalog_fn": _fal_model_catalog,
+    },
+}
+
+
+def _format_imagegen_model_row(model_id: str, meta: dict, widths: dict) -> str:
+    """Format a single picker row with column-aligned speed / strengths / price."""
+    return (
+        f"{model_id:<{widths['model']}}  "
+        f"{meta.get('speed', ''):<{widths['speed']}}  "
+        f"{meta.get('strengths', ''):<{widths['strengths']}}  "
+        f"{meta.get('price', '')}"
+    )
+
+
+
+def _configure_vision_backend() -> None:
+    """Interactive vision-backend configuration.
+
+    Vision is an auxiliary task whose provider/model are resolved from
+    ``auxiliary.vision.{provider,model,base_url}`` in config.yaml (see
+    ``agent/auxiliary_client.resolve_vision_provider_client``). Rather than
+    forcing the user onto OpenRouter, let them pick any authenticated
+    provider + model — the same surface as ``hermes model`` — or point at a
+    custom OpenAI-compatible endpoint. "Auto" leaves the config keys empty so
+    the resolver uses the main model / aggregator fallback chain.
+    """
+    print()
+    print(color("  Vision / Image Analysis needs a multimodal model.", Colors.YELLOW))
+    print(color(
+        "  Pick any provider + model (like /model), or let it auto-detect.",
+        Colors.DIM,
+    ))
+
+    choices = [
+        "Auto — use your main model / aggregator fallback (recommended)",
+        "Pick a provider and model",
+        "Custom OpenAI-compatible endpoint — base URL, API key, model",
+        "Skip",
+    ]
+    idx = _prompt_choice("  Configure vision backend", choices, 0)
+
+    config = load_config()
+    aux = config.setdefault("auxiliary", {})
+    if not isinstance(aux, dict):
+        aux = {}
+        config["auxiliary"] = aux
+    vision_cfg = aux.setdefault("vision", {})
+    if not isinstance(vision_cfg, dict):
+        vision_cfg = {}
+        aux["vision"] = vision_cfg
+
+    if idx == 0:
+        # Auto: clear any pinned override so the resolver auto-detects.
+        for key in ("provider", "model", "base_url", "api_key", "api_mode"):
+            vision_cfg.pop(key, None)
+        save_config(config)
+        _print_success("  Vision set to auto (main model / aggregator fallback)")
+        return
+
+    if idx == 1:
+        _configure_vision_provider_model(config, vision_cfg)
+        return
+
+    if idx == 2:
+        base_url = _prompt("    Base URL (blank for OpenAI)").strip() or "https://api.openai.com/v1"
+        is_native_openai = base_url_hostname(base_url) == "api.openai.com"
+        key_label = "    OPENAI_API_KEY" if is_native_openai else "    API key"
+        api_key = _prompt(key_label, password=True)
+        if not (api_key and api_key.strip()):
+            _print_warning("    Skipped")
+            return
+        default_model = "gpt-4o-mini" if is_native_openai else ""
+        model = _prompt(
+            f"    Vision model{f' (blank for {default_model})' if default_model else ''}"
+        ).strip() or default_model
+        save_env_value("OPENAI_API_KEY", api_key.strip())
+        # Only base_url + model go to config.yaml; the key is the secret.
+        # Pin provider="custom" so the resolver routes through this endpoint —
+        # leaving it at the "auto" default would make _resolve_task_provider_model
+        # ignore the base_url (it only honors base_url when paired with an
+        # api_key in config or a non-auto provider).
+        vision_cfg["provider"] = "custom"
+        vision_cfg["base_url"] = base_url
+        if model:
+            vision_cfg["model"] = model
+        else:
+            vision_cfg.pop("model", None)
+        save_config(config)
+        _print_success(f"  Vision set to custom endpoint{f' ({model})' if model else ''}")
+        return
+
+    # Skip
+    _print_info("  Skipped vision configuration")
+
+
+def _configure_vision_provider_model(config: dict, vision_cfg: dict) -> None:
+    """Provider + model picker for vision, mirroring the ``/model`` surface.
+
+    Provider rows come from ``build_aux_picker_rows()`` — the shared aux-picker
+    substrate — so this picker lists exactly what the ``hermes model`` aux-task
+    picker lists, including the user's own ``providers:`` / ``custom_providers:``
+    endpoints. Lets the user pick a provider and then a model from its curated
+    list (or type a custom id), and persists ``auxiliary.vision.provider`` +
+    ``.model``.
+    """
+    try:
+        from hermes_cli.inventory import (
+            build_aux_picker_rows,
+            format_aux_picker_entries,
+        )
+    except Exception as exc:  # pragma: no cover - import guard
+        _print_warning(f"  Could not load provider list: {exc}")
+        return
+
+    current_provider = str(vision_cfg.get("provider") or "").strip()
+    current_model = str(vision_cfg.get("model") or "").strip()
+    current_base_url = str(vision_cfg.get("base_url") or "").strip()
+
+    try:
+        providers = build_aux_picker_rows(
+            current_provider=current_provider,
+            current_model=current_model,
+            current_base_url=current_base_url,
+            max_models=40,
+        )
+    except Exception as exc:
+        _print_warning(f"  Could not detect providers: {exc}")
+        providers = []
+
+    if not providers:
+        _print_warning(
+            "  No authenticated providers found. Configure a provider first "
+            "with `hermes model`, then re-run this."
+        )
+        return
+
+    provider_labels = [
+        label
+        for _slug, label, _models in format_aux_picker_entries(
+            providers,
+            current_provider=current_provider,
+            current_base_url=current_base_url,
+        )
+    ]
+    provider_labels.append("Cancel")
+
+    pidx = _prompt_choice("  Choose vision provider:", provider_labels, 0)
+    if pidx >= len(providers):
+        _print_info("  Cancelled")
+        return
+
+    chosen = providers[pidx]
+    slug = chosen.get("slug")
+    models = list(chosen.get("models", []))
+
+    model_choices = list(models) + ["Type a custom model id…"]
+    midx = _prompt_choice(
+        f"  Choose vision model for {chosen.get('name') or slug}:",
+        model_choices,
+        0,
+    )
+    if midx < len(models):
+        model = models[midx]
+    else:
+        model = _prompt("    Model id").strip()
+        if not model:
+            _print_warning("  No model entered — cancelled")
+            return
+
+    vision_cfg["provider"] = slug
+    vision_cfg["model"] = model
+    # A provider selection supersedes any prior custom endpoint override.
+    vision_cfg.pop("base_url", None)
+    vision_cfg.pop("api_key", None)
+    save_config(config)
+    _print_success(f"  Vision set to {slug} / {model}")
+
+
+def _configure_simple_requirements(ts_key: str):
+    """Simple fallback for toolsets that just need env vars (no provider selection)."""
+    if ts_key == "vision":
+        if _toolset_has_keys("vision"):
+            return
+        _configure_vision_backend()
+        return
+
+    requirements = TOOLSET_ENV_REQUIREMENTS.get(ts_key, [])
+    if not requirements:
+        return
+
+    missing = [(var, url) for var, url in requirements if not get_env_value(var)]
+    if not missing:
+        return
+
+    ts_label = next((l for k, l, _ in _get_effective_configurable_toolsets() if k == ts_key), ts_key)
+    print()
+    print(color(f"  {ts_label} requires configuration:", Colors.YELLOW))
+
+    for var, url in missing:
+        if url:
+            _print_info(f"  Get key at: {url}")
+        value = _prompt(f"    {var}", password=True)
+        if value and value.strip():
+            save_env_value(var, value.strip())
+            _print_success("    Saved")
+        else:
+            _print_warning("    Skipped")
+
+
+
+def _reconfigure_tool(
+    config: dict,
+    *,
+    force_fresh: bool = True,
+):
+    """Let user reconfigure an existing tool's provider or API key."""
+    # Build list of configurable tools that are currently set up
+    configurable = []
+    for ts_key, ts_label, _ in _get_effective_configurable_toolsets():
+        cat = TOOL_CATEGORIES.get(ts_key)
+        reqs = TOOLSET_ENV_REQUIREMENTS.get(ts_key)
+        if cat or reqs:
+            if (
+                _toolset_has_keys(ts_key, config, force_fresh=force_fresh)
+                or _toolset_enabled_for_reconfigure(ts_key, config)
+            ):
+                configurable.append((ts_key, ts_label))
+
+    if not configurable:
+        _print_info("No configured tools to reconfigure.")
+        return
+
+    choices = [label for _, label in configurable]
+    choices.append("Cancel")
+
+    idx = _prompt_choice("  Which tool would you like to reconfigure?", choices, len(choices) - 1)
+
+    if idx >= len(configurable):
+        return  # Cancel
+
+    ts_key, ts_label = configurable[idx]
+    cat = TOOL_CATEGORIES.get(ts_key)
+
+    if cat:
+        _configure_tool_category_for_reconfig(
+            ts_key,
+            cat,
+            config,
+            force_fresh=force_fresh,
+        )
+    else:
+        _reconfigure_simple_requirements(ts_key)
+
+    save_config(config)
+
+
+def _toolset_enabled_for_reconfigure(ts_key: str, config: dict) -> bool:
+    """Return True if a configurable toolset is enabled anywhere.
+
+    Reconfigure must include enabled-but-unconfigured categories so users can
+    finish provider/API-key setup without disabling and re-enabling the toolset.
+    """
+    for platform in PLATFORMS:
+        if not _toolset_allowed_for_platform(ts_key, platform):
+            continue
         try:
-            from agent.video_gen_registry import list_providers
-            from hermes_cli.plugins import _ensure_plugins_discovered
-
-            _ensure_plugins_discovered()
-            for provider in list_providers():
-                try:
-                    if provider.is_available():
-                        return False
-                except Exception:
-                    continue
+            enabled = _get_platform_tools(
+                config,
+                platform,
+                include_default_mcp_servers=False,
+            )
         except Exception:
-            pass
-        return True
-
-    return not _toolset_has_keys(ts_key, config, force_fresh=force_fresh)
+            continue
+        if ts_key in enabled:
+            return True
+    return False
 
 
 def _configure_tool_category(
@@ -3272,134 +3283,68 @@ def _configure_tool_category(
         _configure_provider(providers[provider_idx], config, force_fresh=force_fresh)
 
 
-def _is_provider_active(
-    provider: dict,
+
+def _configure_tool_category_for_reconfig(
+    ts_key: str,
+    cat: dict,
     config: dict,
     *,
-    force_fresh: bool = False,
-) -> bool:
-    """Check if a provider entry matches the currently active config."""
-    plugin_name = provider.get("image_gen_plugin_name")
-    if plugin_name:
-        image_cfg = config.get("image_gen", {})
-        return isinstance(image_cfg, dict) and image_cfg.get("provider") == plugin_name
+    force_fresh: bool = True,
+):
+    """Reconfigure a tool category - provider selection + API key update."""
+    icon = cat.get("icon", "")
+    name = cat["name"]
+    providers = _visible_providers(cat, config, force_fresh=force_fresh)
+    hidden_nous_message = _hidden_nous_gateway_message(
+        cat,
+        config,
+        f"the Nous Subscription provider for {name}",
+        force_fresh=force_fresh,
+    )
 
-    video_plugin_name = provider.get("video_gen_plugin_name")
-    if video_plugin_name and not provider.get("managed_nous_feature"):
-        video_cfg = config.get("video_gen", {})
-        return isinstance(video_cfg, dict) and video_cfg.get("provider") == video_plugin_name
+    if len(providers) == 1:
+        provider = providers[0]
+        print()
+        print(color(f"  --- {icon} {name} ({provider['name']}) ---", Colors.CYAN))
+        if hidden_nous_message:
+            for line in hidden_nous_message.splitlines():
+                _print_warning(f"  {line}")
+        _reconfigure_provider(provider, config, force_fresh=force_fresh)
+    else:
+        print()
+        print(color(f"  --- {icon} {name} - Choose a provider ---", Colors.CYAN))
+        if hidden_nous_message:
+            for line in hidden_nous_message.splitlines():
+                _print_warning(f"  {line}")
+        print()
 
-    managed_feature = provider.get("managed_nous_feature")
-    if managed_feature:
-        features = get_nous_subscription_features(config, force_fresh=force_fresh)
-        feature = features.features.get(managed_feature)
-        if feature is None:
-            return False
-        if managed_feature == "image_gen":
-            image_cfg = config.get("image_gen", {})
-            if isinstance(image_cfg, dict):
-                configured_provider = image_cfg.get("provider")
-                if configured_provider not in {None, "", "fal"}:
-                    return False
-                if image_cfg.get("use_gateway") is not None and not is_truthy_value(image_cfg.get("use_gateway"), default=False):
-                    return False
-            return feature.managed_by_nous
-        if managed_feature == "video_gen":
-            video_cfg = config.get("video_gen", {})
-            if isinstance(video_cfg, dict):
-                configured_provider = video_cfg.get("provider")
-                if configured_provider not in {None, "", "fal"}:
-                    return False
-                if video_cfg.get("use_gateway") is not None and not is_truthy_value(video_cfg.get("use_gateway"), default=False):
-                    return False
-            return feature.managed_by_nous
-        if provider.get("tts_provider"):
-            return (
-                feature.managed_by_nous
-                and cfg_get(config, "tts", "provider") == provider["tts_provider"]
-            )
-        if provider.get("stt_provider"):
-            return (
-                feature.managed_by_nous
-                and cfg_get(config, "stt", "provider") == provider["stt_provider"]
-            )
-        if "browser_provider" in provider:
-            current = cfg_get(config, "browser", "cloud_provider")
-            return feature.managed_by_nous and provider["browser_provider"] == current
-        if provider.get("web_backend"):
-            current = cfg_get(config, "web", "backend")
-            return feature.managed_by_nous and current == provider["web_backend"]
-        return feature.managed_by_nous
+        provider_choices = []
+        for p in providers:
+            badge = f" [{p['badge']}]" if p.get("badge") else ""
+            tag = f" — {p['tag']}" if p.get("tag") else ""
+            configured = ""
+            env_vars = p.get("env_vars", [])
+            if not env_vars or all(get_env_value(v["key"]) for v in env_vars):
+                if _is_provider_active(p, config, force_fresh=force_fresh):
+                    configured = " [active]"
+                elif not env_vars:
+                    configured = ""
+                else:
+                    configured = " [configured]"
+            provider_choices.append(f"{p['name']}{badge}{tag}{configured}")
 
-    if provider.get("tts_provider"):
-        return cfg_get(config, "tts", "provider") == provider["tts_provider"]
-    if provider.get("stt_provider"):
-        # Default stt.provider is "local" — an unset key means Local Whisper.
-        current = cfg_get(config, "stt", "provider") or "local"
-        return current == provider["stt_provider"]
-    if "browser_provider" in provider:
-        current = cfg_get(config, "browser", "cloud_provider")
-        return provider["browser_provider"] == current
-    if provider.get("web_backend"):
-        current = cfg_get(config, "web", "backend")
-        return current == provider["web_backend"]
-    if provider.get("imagegen_backend"):
-        image_cfg = config.get("image_gen", {})
-        if not isinstance(image_cfg, dict):
-            return False
-        configured_provider = image_cfg.get("provider")
-        return (
-            provider["imagegen_backend"] == "fal"
-            and configured_provider in {None, "", "fal"}
-            and not is_truthy_value(image_cfg.get("use_gateway"), default=False)
+        default_idx = _detect_active_provider_index(
+            providers,
+            config,
+            force_fresh=force_fresh,
         )
-    return False
 
-
-def _detect_active_provider_index(
-    providers: list,
-    config: dict,
-    *,
-    force_fresh: bool = False,
-) -> int:
-    """Return the index of the currently active provider, or 0."""
-    for i, p in enumerate(providers):
-        if _is_provider_active(p, config, force_fresh=force_fresh):
-            return i
-        # Fallback: env vars present → likely configured
-        env_vars = p.get("env_vars", [])
-        if env_vars and all(get_env_value(v["key"]) for v in env_vars):
-            return i
-    return 0
-
-
-# ─── Image Generation Model Pickers ───────────────────────────────────────────
-#
-# IMAGEGEN_BACKENDS is a per-backend catalog. Each entry exposes:
-#   - config_key:        top-level config.yaml key for this backend's settings
-#   - model_catalog_fn:  returns an OrderedDict-like {model_id: metadata}
-#   - default_model:     fallback when nothing is configured
-#
-# This prepares for future imagegen backends (Replicate, Stability, etc.):
-# each new backend registers its own entry; the FAL provider entry in
-# TOOL_CATEGORIES tags itself with `imagegen_backend: "fal"` to select the
-# right catalog at picker time.
-
-
-def _fal_model_catalog():
-    """Lazy-load the FAL model catalog from the tool module."""
-    from tools.image_generation_tool import FAL_MODELS, DEFAULT_MODEL
-    return FAL_MODELS, DEFAULT_MODEL
-
-
-IMAGEGEN_BACKENDS = {
-    "fal": {
-        "display": "FAL.ai",
-        "config_key": "image_gen",
-        "catalog_fn": _fal_model_catalog,
-    },
-}
-
+        provider_idx = _prompt_choice("  Select provider:", provider_choices, default_idx)
+        _reconfigure_provider(
+            providers[provider_idx],
+            config,
+            force_fresh=force_fresh,
+        )
 
 def _format_imagegen_model_row(model_id: str, meta: dict, widths: dict) -> str:
     """Format a single picker row with column-aligned speed / strengths / price."""
@@ -3598,163 +3543,107 @@ def _configure_xai_imagine_storage(section_name: str, config: dict) -> None:
         _print_success("  xAI stored public URLs enabled without automatic expiry")
 
 
-def _select_plugin_image_gen_provider(plugin_name: str, config: dict) -> None:
-    """Persist a plugin-backed image generation provider selection."""
-    img_cfg = config.setdefault("image_gen", {})
-    if not isinstance(img_cfg, dict):
-        img_cfg = {}
-        config["image_gen"] = img_cfg
-    img_cfg["provider"] = plugin_name
-    img_cfg["use_gateway"] = False
-    _print_success(f"  image_gen.provider set to: {plugin_name}")
-    _configure_imagegen_model_for_plugin(plugin_name, config)
-    if plugin_name == "xai":
-        _configure_xai_imagine_storage("image_gen", config)
+def _is_provider_active(
+    provider: dict,
+    config: dict,
+    *,
+    force_fresh: bool = False,
+) -> bool:
+    """Check if a provider entry matches the currently active config."""
+    plugin_name = provider.get("image_gen_plugin_name")
+    if plugin_name:
+        image_cfg = config.get("image_gen", {})
+        return isinstance(image_cfg, dict) and image_cfg.get("provider") == plugin_name
 
 
-# ─── Video Generation Model Pickers ───────────────────────────────────────────
+    managed_feature = provider.get("managed_nous_feature")
+    if managed_feature:
+        features = get_nous_subscription_features(config, force_fresh=force_fresh)
+        feature = features.features.get(managed_feature)
+        if feature is None:
+            return False
+        if managed_feature == "image_gen":
+            image_cfg = config.get("image_gen", {})
+            if isinstance(image_cfg, dict):
+                configured_provider = image_cfg.get("provider")
+                if configured_provider not in {None, "", "fal"}:
+                    return False
+                if image_cfg.get("use_gateway") is not None and not is_truthy_value(image_cfg.get("use_gateway"), default=False):
+                    return False
+            return feature.managed_by_nous
+        if provider.get("tts_provider"):
+            return (
+                feature.managed_by_nous
+                and cfg_get(config, "tts", "provider") == provider["tts_provider"]
+            )
+        if provider.get("stt_provider"):
+            return (
+                feature.managed_by_nous
+                and cfg_get(config, "stt", "provider") == provider["stt_provider"]
+            )
+        if "browser_provider" in provider:
+            current = cfg_get(config, "browser", "cloud_provider")
+            return feature.managed_by_nous and provider["browser_provider"] == current
+        if provider.get("web_backend"):
+            current = cfg_get(config, "web", "backend")
+            return feature.managed_by_nous and current == provider["web_backend"]
+        return feature.managed_by_nous
 
-
-def _plugin_video_gen_catalog(plugin_name: str):
-    """Return ``(catalog_dict, default_model_id)`` for a video gen plugin.
-
-    Mirrors :func:`_plugin_image_gen_catalog`. Returns ``({}, None)`` when
-    the plugin isn't registered or has no models.
-    """
-    try:
-        from agent.video_gen_registry import get_provider
-        from hermes_cli.plugins import _ensure_plugins_discovered
-
-        _ensure_plugins_discovered()
-        provider = get_provider(plugin_name)
-    except Exception:
-        return {}, None
-    if provider is None:
-        return {}, None
-    try:
-        models = provider.list_models() or []
-        default = provider.default_model()
-    except Exception:
-        return {}, None
-    catalog = {m["id"]: m for m in models if isinstance(m, dict) and "id" in m}
-    return catalog, default
-
-
-def _configure_videogen_model_for_plugin(plugin_name: str, config: dict) -> None:
-    """Prompt for a video gen model from a plugin's catalog.
-
-    Mirrors :func:`_configure_imagegen_model_for_plugin`. Writes the
-    selection to ``video_gen.model``.
-    """
-    catalog, default_model = _plugin_video_gen_catalog(plugin_name)
-    if not catalog:
-        return
-
-    cur_cfg = config.setdefault("video_gen", {})
-    if not isinstance(cur_cfg, dict):
-        cur_cfg = {}
-        config["video_gen"] = cur_cfg
-    current_model = cur_cfg.get("model") or default_model
-    if current_model not in catalog:
-        current_model = default_model
-
-    model_ids = list(catalog.keys())
-    ordered = [current_model] + [m for m in model_ids if m != current_model]
-
-    widths = {
-        "model": max(len(m) for m in model_ids),
-        "speed": max((len(catalog[m].get("speed", "")) for m in model_ids), default=6),
-        "strengths": max((len(catalog[m].get("strengths", "")) for m in model_ids), default=0),
-    }
-
-    print()
-    header = (
-        f"  {'Model':<{widths['model']}}  "
-        f"{'Speed':<{widths['speed']}}  "
-        f"{'Strengths':<{widths['strengths']}}  "
-        f"Price"
-    )
-    print(color(header, Colors.CYAN))
-
-    rows = []
-    for mid in ordered:
-        meta = catalog[mid]
-        row = (
-            f"  {mid:<{widths['model']}}  "
-            f"{meta.get('speed', ''):<{widths['speed']}}  "
-            f"{meta.get('strengths', ''):<{widths['strengths']}}  "
-            f"{meta.get('price', '')}"
+    if provider.get("tts_provider"):
+        return cfg_get(config, "tts", "provider") == provider["tts_provider"]
+    if provider.get("stt_provider"):
+        # Default stt.provider is "local" — an unset key means Local Whisper.
+        current = cfg_get(config, "stt", "provider") or "local"
+        return current == provider["stt_provider"]
+    if "browser_provider" in provider:
+        current = cfg_get(config, "browser", "cloud_provider")
+        return provider["browser_provider"] == current
+    if provider.get("web_backend"):
+        current = cfg_get(config, "web", "backend")
+        return current == provider["web_backend"]
+    if provider.get("imagegen_backend"):
+        image_cfg = config.get("image_gen", {})
+        if not isinstance(image_cfg, dict):
+            return False
+        configured_provider = image_cfg.get("provider")
+        return (
+            provider["imagegen_backend"] == "fal"
+            and configured_provider in {None, "", "fal"}
+            and not is_truthy_value(image_cfg.get("use_gateway"), default=False)
         )
-        if mid == current_model:
-            row += "  ← currently in use"
-        rows.append(row)
-
-    idx = _prompt_choice(
-        f"  Choose {plugin_name} model:",
-        rows,
-        default=0,
-    )
-
-    chosen = ordered[idx]
-    cur_cfg["model"] = chosen
-    _print_success(f"  Model set to: {chosen}")
+    return False
 
 
-# Per-provider STT model catalogs for the interactive picker. Keys are
-# ``stt.<provider>`` config sections; the first entry is the default.
-# Kept in sync with the dashboard selects (hermes_cli/web_server.py
-# _CONFIG_FIELD_META) and the desktop settings enums
-# (apps/desktop/src/app/settings/constants.ts).
-STT_MODEL_CATALOG = {
-    "local": ["base", "tiny", "small", "medium", "large-v3"],
-    "groq": ["whisper-large-v3-turbo", "whisper-large-v3", "distil-whisper-large-v3-en"],
-    "openai": ["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe", "gpt-transcribe"],
-    "elevenlabs": ["scribe_v2", "scribe_v1"],
-}
 
-# ElevenLabs historically uses ``model_id`` instead of ``model``.
-_STT_MODEL_CONFIG_KEY = {"elevenlabs": "model_id"}
-
-
-def _configure_stt_model(stt_provider: str, config: dict) -> None:
-    """Prompt for the STT model after a provider pick (when a catalog exists).
-
-    Providers without a static catalog (xai, deepinfra) skip the prompt —
-    xAI has a single model and DeepInfra resolves from its live catalog.
-    """
-    catalog = STT_MODEL_CATALOG.get(stt_provider)
-    if not catalog:
-        return
-    stt_cfg = config.setdefault("stt", {})
-    if not isinstance(stt_cfg, dict):
-        stt_cfg = {}
-        config["stt"] = stt_cfg
-    prov_cfg = stt_cfg.setdefault(stt_provider, {})
-    if not isinstance(prov_cfg, dict):
-        prov_cfg = {}
-        stt_cfg[stt_provider] = prov_cfg
-    model_key = _STT_MODEL_CONFIG_KEY.get(stt_provider, "model")
-    current = str(prov_cfg.get(model_key) or "").strip()
-    ordered = list(catalog)
-    default_idx = ordered.index(current) if current in ordered else 0
-    idx = _prompt_choice("  Select STT model:", ordered, default_idx)
-    chosen = ordered[idx]
-    prov_cfg[model_key] = chosen
-    _print_success(f"  STT model set to: {chosen}")
+def _detect_active_provider_index(
+    providers: list,
+    config: dict,
+    *,
+    force_fresh: bool = False,
+) -> int:
+    """Return the index of the currently active provider, or 0."""
+    for i, p in enumerate(providers):
+        if _is_provider_active(p, config, force_fresh=force_fresh):
+            return i
+        # Fallback: env vars present → likely configured
+        env_vars = p.get("env_vars", [])
+        if env_vars and all(get_env_value(v["key"]) for v in env_vars):
+            return i
+    return 0
 
 
-def _select_plugin_video_gen_provider(plugin_name: str, config: dict, *, use_gateway: bool = False) -> None:
-    """Persist a plugin-backed video generation provider selection."""
-    vid_cfg = config.setdefault("video_gen", {})
-    if not isinstance(vid_cfg, dict):
-        vid_cfg = {}
-        config["video_gen"] = vid_cfg
-    vid_cfg["provider"] = plugin_name
-    vid_cfg["use_gateway"] = use_gateway
-    _print_success(f"  video_gen.provider set to: {plugin_name}")
-    _configure_videogen_model_for_plugin(plugin_name, config)
-    if plugin_name == "xai":
-        _configure_xai_imagine_storage("video_gen", config)
+# ─── Image Generation Model Pickers ───────────────────────────────────────────
+#
+# IMAGEGEN_BACKENDS is a per-backend catalog. Each entry exposes:
+#   - config_key:        top-level config.yaml key for this backend's settings
+#   - model_catalog_fn:  returns an OrderedDict-like {model_id: metadata}
+#   - default_model:     fallback when nothing is configured
+#
+# This prepares for future imagegen backends (Replicate, Stability, etc.):
+# each new backend registers its own entry; the FAL provider entry in
+# TOOL_CATEGORIES tags itself with `imagegen_backend: "fal"` to select the
+# right catalog at picker time.
+
 
 
 def _write_provider_config(provider: dict, config: dict, *, managed_feature) -> None:
@@ -3807,61 +3696,6 @@ def _write_provider_config(provider: dict, config: dict, *, managed_feature) -> 
                     section["use_gateway"] = False
                 break
 
-
-def apply_provider_selection(ts_key: str, provider_name: str, config: dict) -> None:
-    """Non-interactively persist a provider selection for a toolset.
-
-    Resolves ``provider_name`` within ``ts_key``'s category (matching the
-    rows the GUI/CLI picker shows via :func:`_visible_providers`) and writes
-    the corresponding backend/provider config keys. Unlike
-    :func:`_configure_provider`, this does NOT prompt for API keys, run
-    post-setup hooks, gate on Nous Portal auth, or run interactive model
-    pickers — those are handled separately (env endpoints, post-setup
-    endpoints, the model picker) in the desktop GUI.
-
-    Raises ``KeyError`` if the toolset has no category or the provider name
-    is not found among the visible providers.
-    """
-    cat = TOOL_CATEGORIES.get(ts_key)
-    if cat is None:
-        raise KeyError(f"Toolset has no configurable category: {ts_key}")
-
-    providers = _visible_providers(cat, config, force_fresh=True)
-    provider = next((p for p in providers if p.get("name") == provider_name), None)
-    if provider is None:
-        raise KeyError(f"Unknown provider {provider_name!r} for toolset {ts_key!r}")
-
-    managed_feature = provider.get("managed_nous_feature")
-    _write_provider_config(provider, config, managed_feature=managed_feature)
-
-    # Plugin-registered image/video gen backends record the provider name in
-    # their own config section. Write that here (without the interactive
-    # model picker the CLI runs afterwards — model choice is a separate GUI
-    # flow).
-    plugin_name = provider.get("image_gen_plugin_name")
-    if plugin_name:
-        img_cfg = config.setdefault("image_gen", {})
-        if not isinstance(img_cfg, dict):
-            img_cfg = {}
-            config["image_gen"] = img_cfg
-        img_cfg["provider"] = plugin_name
-        img_cfg["use_gateway"] = bool(managed_feature)
-
-    video_plugin = provider.get("video_gen_plugin_name")
-    if video_plugin:
-        vid_cfg = config.setdefault("video_gen", {})
-        if not isinstance(vid_cfg, dict):
-            vid_cfg = {}
-            config["video_gen"] = vid_cfg
-        vid_cfg["provider"] = video_plugin
-        vid_cfg["use_gateway"] = bool(managed_feature)
-
-    # In-tree FAL imagegen backend: keep image_gen.provider on the legacy
-    # path (mirrors _configure_provider).
-    if provider.get("imagegen_backend"):
-        img_cfg = config.setdefault("image_gen", {})
-        if isinstance(img_cfg, dict) and img_cfg.get("provider") not in {None, "", "fal"}:
-            img_cfg["provider"] = "fal"
 
 
 def _configure_provider(
@@ -3951,12 +3785,6 @@ def _configure_provider(
         if plugin_name:
             _select_plugin_image_gen_provider(plugin_name, config)
             return
-        # Plugin-registered video_gen provider — same flow, different
-        # registry.
-        video_plugin = provider.get("video_gen_plugin_name")
-        if video_plugin:
-            _select_plugin_video_gen_provider(video_plugin, config, use_gateway=bool(managed_feature))
-            return
         # Imagegen backends prompt for model selection after backend pick.
         backend = provider.get("imagegen_backend")
         if backend:
@@ -4036,10 +3864,6 @@ def _configure_provider(
         if plugin_name:
             _select_plugin_image_gen_provider(plugin_name, config)
             return
-        video_plugin = provider.get("video_gen_plugin_name")
-        if video_plugin:
-            _select_plugin_video_gen_provider(video_plugin, config, use_gateway=bool(managed_feature))
-            return
         # Imagegen backends prompt for model selection after env vars are in.
         backend = provider.get("imagegen_backend")
         if backend:
@@ -4052,329 +3876,50 @@ def _configure_provider(
             _configure_stt_model(provider["stt_provider"], config)
 
 
-def _configure_vision_backend() -> None:
-    """Interactive vision-backend configuration.
 
-    Vision is an auxiliary task whose provider/model are resolved from
-    ``auxiliary.vision.{provider,model,base_url}`` in config.yaml (see
-    ``agent/auxiliary_client.resolve_vision_provider_client``). Rather than
-    forcing the user onto OpenRouter, let them pick any authenticated
-    provider + model — the same surface as ``hermes model`` — or point at a
-    custom OpenAI-compatible endpoint. "Auto" leaves the config keys empty so
-    the resolver uses the main model / aggregator fallback chain.
+def _select_plugin_image_gen_provider(plugin_name: str, config: dict) -> None:
+    """Persist a plugin-backed image generation provider selection."""
+    img_cfg = config.setdefault("image_gen", {})
+    if not isinstance(img_cfg, dict):
+        img_cfg = {}
+        config["image_gen"] = img_cfg
+    img_cfg["provider"] = plugin_name
+    img_cfg["use_gateway"] = False
+    _print_success(f"  image_gen.provider set to: {plugin_name}")
+    _configure_imagegen_model_for_plugin(plugin_name, config)
+    if plugin_name == "xai":
+        _configure_xai_imagine_storage("image_gen", config)
+
+
+# ─── Video Generation Model Pickers ───────────────────────────────────────────
+
+
+def _configure_stt_model(stt_provider: str, config: dict) -> None:
+    """Prompt for the STT model after a provider pick (when a catalog exists).
+
+    Providers without a static catalog (xai, deepinfra) skip the prompt —
+    xAI has a single model and DeepInfra resolves from its live catalog.
     """
-    print()
-    print(color("  Vision / Image Analysis needs a multimodal model.", Colors.YELLOW))
-    print(color(
-        "  Pick any provider + model (like /model), or let it auto-detect.",
-        Colors.DIM,
-    ))
-
-    choices = [
-        "Auto — use your main model / aggregator fallback (recommended)",
-        "Pick a provider and model",
-        "Custom OpenAI-compatible endpoint — base URL, API key, model",
-        "Skip",
-    ]
-    idx = _prompt_choice("  Configure vision backend", choices, 0)
-
-    config = load_config()
-    aux = config.setdefault("auxiliary", {})
-    if not isinstance(aux, dict):
-        aux = {}
-        config["auxiliary"] = aux
-    vision_cfg = aux.setdefault("vision", {})
-    if not isinstance(vision_cfg, dict):
-        vision_cfg = {}
-        aux["vision"] = vision_cfg
-
-    if idx == 0:
-        # Auto: clear any pinned override so the resolver auto-detects.
-        for key in ("provider", "model", "base_url", "api_key", "api_mode"):
-            vision_cfg.pop(key, None)
-        save_config(config)
-        _print_success("  Vision set to auto (main model / aggregator fallback)")
+    catalog = STT_MODEL_CATALOG.get(stt_provider)
+    if not catalog:
         return
+    stt_cfg = config.setdefault("stt", {})
+    if not isinstance(stt_cfg, dict):
+        stt_cfg = {}
+        config["stt"] = stt_cfg
+    prov_cfg = stt_cfg.setdefault(stt_provider, {})
+    if not isinstance(prov_cfg, dict):
+        prov_cfg = {}
+        stt_cfg[stt_provider] = prov_cfg
+    model_key = _STT_MODEL_CONFIG_KEY.get(stt_provider, "model")
+    current = str(prov_cfg.get(model_key) or "").strip()
+    ordered = list(catalog)
+    default_idx = ordered.index(current) if current in ordered else 0
+    idx = _prompt_choice("  Select STT model:", ordered, default_idx)
+    chosen = ordered[idx]
+    prov_cfg[model_key] = chosen
+    _print_success(f"  STT model set to: {chosen}")
 
-    if idx == 1:
-        _configure_vision_provider_model(config, vision_cfg)
-        return
-
-    if idx == 2:
-        base_url = _prompt("    Base URL (blank for OpenAI)").strip() or "https://api.openai.com/v1"
-        is_native_openai = base_url_hostname(base_url) == "api.openai.com"
-        key_label = "    OPENAI_API_KEY" if is_native_openai else "    API key"
-        api_key = _prompt(key_label, password=True)
-        if not (api_key and api_key.strip()):
-            _print_warning("    Skipped")
-            return
-        default_model = "gpt-4o-mini" if is_native_openai else ""
-        model = _prompt(
-            f"    Vision model{f' (blank for {default_model})' if default_model else ''}"
-        ).strip() or default_model
-        save_env_value("OPENAI_API_KEY", api_key.strip())
-        # Only base_url + model go to config.yaml; the key is the secret.
-        # Pin provider="custom" so the resolver routes through this endpoint —
-        # leaving it at the "auto" default would make _resolve_task_provider_model
-        # ignore the base_url (it only honors base_url when paired with an
-        # api_key in config or a non-auto provider).
-        vision_cfg["provider"] = "custom"
-        vision_cfg["base_url"] = base_url
-        if model:
-            vision_cfg["model"] = model
-        else:
-            vision_cfg.pop("model", None)
-        save_config(config)
-        _print_success(f"  Vision set to custom endpoint{f' ({model})' if model else ''}")
-        return
-
-    # Skip
-    _print_info("  Skipped vision configuration")
-
-
-def _configure_vision_provider_model(config: dict, vision_cfg: dict) -> None:
-    """Provider + model picker for vision, mirroring the ``/model`` surface.
-
-    Provider rows come from ``build_aux_picker_rows()`` — the shared aux-picker
-    substrate — so this picker lists exactly what the ``hermes model`` aux-task
-    picker lists, including the user's own ``providers:`` / ``custom_providers:``
-    endpoints. Lets the user pick a provider and then a model from its curated
-    list (or type a custom id), and persists ``auxiliary.vision.provider`` +
-    ``.model``.
-    """
-    try:
-        from hermes_cli.inventory import (
-            build_aux_picker_rows,
-            format_aux_picker_entries,
-        )
-    except Exception as exc:  # pragma: no cover - import guard
-        _print_warning(f"  Could not load provider list: {exc}")
-        return
-
-    current_provider = str(vision_cfg.get("provider") or "").strip()
-    current_model = str(vision_cfg.get("model") or "").strip()
-    current_base_url = str(vision_cfg.get("base_url") or "").strip()
-
-    try:
-        providers = build_aux_picker_rows(
-            current_provider=current_provider,
-            current_model=current_model,
-            current_base_url=current_base_url,
-            max_models=40,
-        )
-    except Exception as exc:
-        _print_warning(f"  Could not detect providers: {exc}")
-        providers = []
-
-    if not providers:
-        _print_warning(
-            "  No authenticated providers found. Configure a provider first "
-            "with `hermes model`, then re-run this."
-        )
-        return
-
-    provider_labels = [
-        label
-        for _slug, label, _models in format_aux_picker_entries(
-            providers,
-            current_provider=current_provider,
-            current_base_url=current_base_url,
-        )
-    ]
-    provider_labels.append("Cancel")
-
-    pidx = _prompt_choice("  Choose vision provider:", provider_labels, 0)
-    if pidx >= len(providers):
-        _print_info("  Cancelled")
-        return
-
-    chosen = providers[pidx]
-    slug = chosen.get("slug")
-    models = list(chosen.get("models", []))
-
-    model_choices = list(models) + ["Type a custom model id…"]
-    midx = _prompt_choice(
-        f"  Choose vision model for {chosen.get('name') or slug}:",
-        model_choices,
-        0,
-    )
-    if midx < len(models):
-        model = models[midx]
-    else:
-        model = _prompt("    Model id").strip()
-        if not model:
-            _print_warning("  No model entered — cancelled")
-            return
-
-    vision_cfg["provider"] = slug
-    vision_cfg["model"] = model
-    # A provider selection supersedes any prior custom endpoint override.
-    vision_cfg.pop("base_url", None)
-    vision_cfg.pop("api_key", None)
-    save_config(config)
-    _print_success(f"  Vision set to {slug} / {model}")
-
-
-def _configure_simple_requirements(ts_key: str):
-    """Simple fallback for toolsets that just need env vars (no provider selection)."""
-    if ts_key == "vision":
-        if _toolset_has_keys("vision"):
-            return
-        _configure_vision_backend()
-        return
-
-    requirements = TOOLSET_ENV_REQUIREMENTS.get(ts_key, [])
-    if not requirements:
-        return
-
-    missing = [(var, url) for var, url in requirements if not get_env_value(var)]
-    if not missing:
-        return
-
-    ts_label = next((l for k, l, _ in _get_effective_configurable_toolsets() if k == ts_key), ts_key)
-    print()
-    print(color(f"  {ts_label} requires configuration:", Colors.YELLOW))
-
-    for var, url in missing:
-        if url:
-            _print_info(f"  Get key at: {url}")
-        value = _prompt(f"    {var}", password=True)
-        if value and value.strip():
-            save_env_value(var, value.strip())
-            _print_success("    Saved")
-        else:
-            _print_warning("    Skipped")
-
-
-def _reconfigure_tool(
-    config: dict,
-    *,
-    force_fresh: bool = True,
-):
-    """Let user reconfigure an existing tool's provider or API key."""
-    # Build list of configurable tools that are currently set up
-    configurable = []
-    for ts_key, ts_label, _ in _get_effective_configurable_toolsets():
-        cat = TOOL_CATEGORIES.get(ts_key)
-        reqs = TOOLSET_ENV_REQUIREMENTS.get(ts_key)
-        if cat or reqs:
-            if (
-                _toolset_has_keys(ts_key, config, force_fresh=force_fresh)
-                or _toolset_enabled_for_reconfigure(ts_key, config)
-            ):
-                configurable.append((ts_key, ts_label))
-
-    if not configurable:
-        _print_info("No configured tools to reconfigure.")
-        return
-
-    choices = [label for _, label in configurable]
-    choices.append("Cancel")
-
-    idx = _prompt_choice("  Which tool would you like to reconfigure?", choices, len(choices) - 1)
-
-    if idx >= len(configurable):
-        return  # Cancel
-
-    ts_key, ts_label = configurable[idx]
-    cat = TOOL_CATEGORIES.get(ts_key)
-
-    if cat:
-        _configure_tool_category_for_reconfig(
-            ts_key,
-            cat,
-            config,
-            force_fresh=force_fresh,
-        )
-    else:
-        _reconfigure_simple_requirements(ts_key)
-
-    save_config(config)
-
-
-def _toolset_enabled_for_reconfigure(ts_key: str, config: dict) -> bool:
-    """Return True if a configurable toolset is enabled anywhere.
-
-    Reconfigure must include enabled-but-unconfigured categories so users can
-    finish provider/API-key setup without disabling and re-enabling the toolset.
-    """
-    for platform in PLATFORMS:
-        if not _toolset_allowed_for_platform(ts_key, platform):
-            continue
-        try:
-            enabled = _get_platform_tools(
-                config,
-                platform,
-                include_default_mcp_servers=False,
-            )
-        except Exception:
-            continue
-        if ts_key in enabled:
-            return True
-    return False
-
-
-def _configure_tool_category_for_reconfig(
-    ts_key: str,
-    cat: dict,
-    config: dict,
-    *,
-    force_fresh: bool = True,
-):
-    """Reconfigure a tool category - provider selection + API key update."""
-    icon = cat.get("icon", "")
-    name = cat["name"]
-    providers = _visible_providers(cat, config, force_fresh=force_fresh)
-    hidden_nous_message = _hidden_nous_gateway_message(
-        cat,
-        config,
-        f"the Nous Subscription provider for {name}",
-        force_fresh=force_fresh,
-    )
-
-    if len(providers) == 1:
-        provider = providers[0]
-        print()
-        print(color(f"  --- {icon} {name} ({provider['name']}) ---", Colors.CYAN))
-        if hidden_nous_message:
-            for line in hidden_nous_message.splitlines():
-                _print_warning(f"  {line}")
-        _reconfigure_provider(provider, config, force_fresh=force_fresh)
-    else:
-        print()
-        print(color(f"  --- {icon} {name} - Choose a provider ---", Colors.CYAN))
-        if hidden_nous_message:
-            for line in hidden_nous_message.splitlines():
-                _print_warning(f"  {line}")
-        print()
-
-        provider_choices = []
-        for p in providers:
-            badge = f" [{p['badge']}]" if p.get("badge") else ""
-            tag = f" — {p['tag']}" if p.get("tag") else ""
-            configured = ""
-            env_vars = p.get("env_vars", [])
-            if not env_vars or all(get_env_value(v["key"]) for v in env_vars):
-                if _is_provider_active(p, config, force_fresh=force_fresh):
-                    configured = " [active]"
-                elif not env_vars:
-                    configured = ""
-                else:
-                    configured = " [configured]"
-            provider_choices.append(f"{p['name']}{badge}{tag}{configured}")
-
-        default_idx = _detect_active_provider_index(
-            providers,
-            config,
-            force_fresh=force_fresh,
-        )
-
-        provider_idx = _prompt_choice("  Select provider:", provider_choices, default_idx)
-        _reconfigure_provider(
-            providers[provider_idx],
-            config,
-            force_fresh=force_fresh,
-        )
 
 
 def _reconfigure_provider(
@@ -4475,10 +4020,6 @@ def _reconfigure_provider(
         if plugin_name:
             _select_plugin_image_gen_provider(plugin_name, config)
             return
-        # Plugin-registered video_gen provider — same flow, different registry.
-        video_plugin = provider.get("video_gen_plugin_name")
-        if video_plugin:
-            _select_plugin_video_gen_provider(video_plugin, config, use_gateway=bool(managed_feature))
             return
         # Imagegen backends prompt for model selection on reconfig too.
         backend = provider.get("imagegen_backend")
@@ -4516,12 +4057,6 @@ def _reconfigure_provider(
     plugin_name = provider.get("image_gen_plugin_name")
     if plugin_name:
         _select_plugin_image_gen_provider(plugin_name, config)
-        return
-
-    # Plugin-registered video_gen provider — same flow, different registry.
-    video_plugin = provider.get("video_gen_plugin_name")
-    if video_plugin:
-        _select_plugin_video_gen_provider(video_plugin, config, use_gateway=bool(managed_feature))
         return
 
     backend = provider.get("imagegen_backend")
@@ -5175,3 +4710,60 @@ def tools_disable_enable_command(args):
     if successful:
         verb = "Disabled" if action == "disable" else "Enabled"
         _print_success(f"{verb}: {', '.join(successful)}")
+
+def apply_provider_selection(ts_key: str, provider_name: str, config: dict) -> None:
+    """Non-interactively persist a provider selection for a toolset.
+
+    Resolves ``provider_name`` within ``ts_key``'s category (matching the
+    rows the GUI/CLI picker shows via :func:`_visible_providers`) and writes
+    the corresponding backend/provider config keys. Unlike
+    :func:`_configure_provider`, this does NOT prompt for API keys, run
+    post-setup hooks, gate on Nous Portal auth, or run interactive model
+    pickers — those are handled separately (env endpoints, post-setup
+    endpoints, the model picker) in the desktop GUI.
+
+    Raises ``KeyError`` if the toolset has no category or the provider name
+    is not found among the visible providers.
+    """
+    cat = TOOL_CATEGORIES.get(ts_key)
+    if cat is None:
+        raise KeyError(f"Toolset has no configurable category: {ts_key}")
+
+    providers = _visible_providers(cat, config, force_fresh=True)
+    provider = next((p for p in providers if p.get("name") == provider_name), None)
+    if provider is None:
+        raise KeyError(f"Unknown provider {provider_name!r} for toolset {ts_key!r}")
+
+    managed_feature = provider.get("managed_nous_feature")
+    _write_provider_config(provider, config, managed_feature=managed_feature)
+
+    # Plugin-registered image/video gen backends record the provider name in
+    # their own config section. Write that here (without the interactive
+    # model picker the CLI runs afterwards — model choice is a separate GUI
+    # flow).
+    plugin_name = provider.get("image_gen_plugin_name")
+    if plugin_name:
+        img_cfg = config.setdefault("image_gen", {})
+        if not isinstance(img_cfg, dict):
+            img_cfg = {}
+            config["image_gen"] = img_cfg
+        img_cfg["provider"] = plugin_name
+        img_cfg["use_gateway"] = bool(managed_feature)
+
+    video_plugin = provider.get("video_gen_plugin_name")
+    if video_plugin:
+        vid_cfg = config.setdefault("video_gen", {})
+        if not isinstance(vid_cfg, dict):
+            vid_cfg = {}
+            config["video_gen"] = vid_cfg
+        vid_cfg["provider"] = video_plugin
+        vid_cfg["use_gateway"] = bool(managed_feature)
+
+    # In-tree FAL imagegen backend: keep image_gen.provider on the legacy
+    # path (mirrors _configure_provider).
+    if provider.get("imagegen_backend"):
+        img_cfg = config.setdefault("image_gen", {})
+        if isinstance(img_cfg, dict) and img_cfg.get("provider") not in {None, "", "fal"}:
+            img_cfg["provider"] = "fal"
+
+

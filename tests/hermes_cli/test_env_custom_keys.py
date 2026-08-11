@@ -21,8 +21,6 @@ def _env_rows(monkeypatch, env_on_disk):
     """Drive GET /api/env with a controlled on-disk env mapping."""
     monkeypatch.setattr(web_server, "load_env", lambda: dict(env_on_disk))
     # Channel-managed key detection reads real config; force empty so the test
-    # is hermetic and the custom-key path is exercised directly.
-    monkeypatch.setattr(web_server, "_channel_managed_env_keys", lambda: set())
     resp = client.get("/api/env", headers=HEADERS)
     assert resp.status_code == 200
     return resp.json()
