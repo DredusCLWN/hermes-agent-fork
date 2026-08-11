@@ -152,10 +152,10 @@ def _(rid, params: dict) -> dict:
                     "an ordinary prompt.submit must not drop session history "
                     "(update your Hermes client if a rewind was intended)",
                 )
-            user_indices = [
-                i for i, m in enumerate(history)
-                if m.get("role") == "user" and not m.get("display_kind")
-            ]
+            def _is_real_user(m):
+                from agent.context_compressor import is_user_originated_turn
+                return is_user_originated_turn(m)
+            user_indices = [i for i, m in enumerate(history) if _is_real_user(m)]
             # Reject out-of-range ordinals on BOTH ends. A negative value would
             # otherwise sail past the upper-bound check and hit Python's negative
             # indexing below (user_indices[-1] -> the LAST user turn), silently

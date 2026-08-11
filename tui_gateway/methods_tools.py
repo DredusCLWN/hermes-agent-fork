@@ -718,7 +718,8 @@ def _(rid, params: dict) -> dict:
         last_user_idx = None
         for i in range(len(history) - 1, -1, -1):
             msg = history[i]
-            if msg.get("role") == "user" and not msg.get("display_kind"):
+            from agent.context_compressor import is_user_originated_turn
+            if is_user_originated_turn(msg):
                 last_user_idx = i
                 break
         if last_user_idx is None:
@@ -1299,7 +1300,8 @@ def _(rid, params: dict) -> dict:
                     last_user_idx = None
                     for i in range(len(history) - 1, -1, -1):
                         msg = history[i]
-                        if msg.get("role") == "user" and not msg.get("display_kind"):
+                        from agent.context_compressor import is_user_originated_turn
+                        if is_user_originated_turn(msg):
                             last_user_idx = i
                             break
                     if last_user_idx is not None:
