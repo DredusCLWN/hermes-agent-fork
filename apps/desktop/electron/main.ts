@@ -208,7 +208,6 @@ import {
 } from './updater-process'
 import { formatBlockerMessage, formatProbeFailedMessage, scanVenvBlockers } from './venv-blocker-scan'
 import { fetchMarketplaceThemes, searchMarketplaceThemes } from './vscode-marketplace'
-import { createWakeIndicatorWindowController } from './wake-indicator-window'
 import {
   computeWindowOptions,
   debounce,
@@ -8908,16 +8907,6 @@ function createInstanceWindow() {
   return win
 }
 
-// A macOS-only ambient wake cue. It is deliberately a gateway-less helper
-// window: the active renderer owns voice state and sends only the visual phase.
-const wakeIndicatorController = createWakeIndicatorWindowController({
-  devServer: DEV_SERVER,
-  isMac: IS_MAC,
-  loadWindowUrl,
-  preloadPath: PRELOAD_PATH,
-  rendererIndex: resolveRendererIndex,
-  wireWindow: window => wireCommonWindowHandlers(window, zoomWiringForWindowKind('wakeIndicator'))
-})
 
 // The pet overlay: a single transparent, frameless, always-on-top window that
 // hosts ONLY the floating mascot. Shift-clicking the in-window pet "pops it out"
@@ -9379,7 +9368,6 @@ function createWindow() {
   const createdMainWindow = mainWindow
   mainWindow.on('closed', () => {
     closePetOverlay()
-    wakeIndicatorController.close()
 
     if (mainWindow === createdMainWindow) {
       mainWindow = null
@@ -9579,10 +9567,6 @@ ipcMain.handle('hermes:window:openInstance', async () => {
   createInstanceWindow()
 
   return { ok: true }
-})
-ipcMain.handle('hermes:wake-indicator:get', () => wakeIndicatorController.getState())
-ipcMain.on('hermes:wake-indicator:set', (_event, state) => {
-  wakeIndicatorController.setState(state)
 })
 
 // --- Text size (zoom) -------------------------------------------------------
@@ -11913,15 +11897,6 @@ app.whenReady().then(() => {
   // here and surfaced in Settings via the IPC state (never silent).
   applyQuickEntrySettings(readQuickEntrySettings())
 
-  if (IS_MAC) {
-    const reposition = () => wakeIndicatorController.reposition()
-
-    screen.on('display-added', reposition)
-
-    screen.on('display-metrics-changed', reposition)
-
-    screen.on('display-removed', reposition)
-  }
 
   createWindow()
 
@@ -12051,7 +12026,6 @@ app.on('before-quit', event => {
   // The always-on-top overlay isn't a "real" app window; close it so a stray
   // pet can't keep the process alive or float over a quit app.
   closePetOverlay()
-  wakeIndicatorController.close()
 
   // Same for the Quick Entry composer — and release its global accelerator so a
   // quitting Hermes never keeps another app's chord hostage.

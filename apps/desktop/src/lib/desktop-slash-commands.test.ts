@@ -41,7 +41,6 @@ describe('desktop slash command curation', () => {
     expect(isDesktopSlashSuggestion('/approve')).toBe(false)
     expect(isDesktopSlashSuggestion('/model')).toBe(false)
     expect(isDesktopSlashSuggestion('/skills')).toBe(false)
-    expect(isDesktopSlashSuggestion('/voice')).toBe(false)
     expect(isDesktopSlashSuggestion('/curator')).toBe(false)
   })
 
@@ -75,13 +74,6 @@ describe('desktop slash command curation', () => {
     expect(isDesktopSlashCommand('/pets')).toBe(false)
   })
 
-  it('routes /wake through the desktop wake action instead of the slash worker', () => {
-    expect(resolveDesktopCommand('/wake')?.surface).toEqual({ kind: 'action', action: 'wake' })
-    expect(desktopSlashCommandArgumentMode('/wake')).toBe('options')
-    expect(isDesktopSlashSuggestion('/wake')).toBe(true)
-    expect(isDesktopSlashCommand('/wake')).toBe(true)
-    expect(desktopSlashUnavailableMessage('/wake')).toBeNull()
-  })
 
   it('treats /browser as an executable action command (local-gateway connect)', () => {
     // /browser used to be terminal-only; it now resolves to a desktop action

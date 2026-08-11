@@ -109,7 +109,6 @@ export const ZOOM_WINDOW_CONFIG = {
   chat: { zoom: true },
   petOverlay: { zoom: false },
   quickEntry: { zoom: false },
-  wakeIndicator: { zoom: false }
 } as const
 
 export function zoomWiringForWindowKind(kind) {
