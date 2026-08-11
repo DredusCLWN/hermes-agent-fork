@@ -14,7 +14,6 @@ import {
   sessionMatchesStoredId,
   setCurrentBranch,
   setCurrentCwd,
-  setCurrentCwdTransient,
   setCurrentFastMode,
   setCurrentModel,
   setCurrentPersonality,

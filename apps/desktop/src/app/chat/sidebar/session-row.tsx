@@ -4,7 +4,6 @@ import type * as React from 'react'
 
 import { ProfileTag } from '@/app/chat/profile-tag'
 import { startSessionDrag } from '@/app/chat/session-drag'
-
 import { openSession } from '@/app/open-session'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
@@ -232,7 +231,7 @@ function SidebarSessionRowImpl({
           {handoffSource && handoffLabel ? (
             <Tip label={r.handoffOrigin(handoffLabel)}>
 <span className="flex size-4 shrink-0 items-center justify-center rounded-[4px] bg-foreground/10 text-foreground/70">
-                <Codicon name="globe" className="size-2.5" />
+                <Codicon className="size-2.5" name="globe" />
               </span>
             </Tip>
           ) : null}

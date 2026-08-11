@@ -11,6 +11,7 @@ let rest: null | Rest = null
 
 export function bindApi(r: Rest): () => void {
   rest = r
+
   return () => { rest = null }
 }
 

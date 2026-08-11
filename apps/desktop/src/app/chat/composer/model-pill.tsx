@@ -89,12 +89,14 @@ export function ModelPill({
     view.kind === 'primary' && !runtimeId && modelSource === 'manual' && Boolean(currentModel.trim())
 
   const contextLabel = useMemo(() => {
-    if (!usage || !usage.context_max) return ''
+    if (!usage || !usage.context_max) {return ''}
+
     return usageContextLabel(usage)
   }, [usage])
 
   const contextBarText = useMemo(() => {
-    if (!usage || !usage.context_max) return ''
+    if (!usage || !usage.context_max) {return ''}
+
     return contextBar(usage.context_percent, 6)
   }, [usage])
 

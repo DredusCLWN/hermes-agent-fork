@@ -387,13 +387,16 @@ export function useSessionActions({
               : $currentCwd.get().trim() || resolveNewSessionCwd()
 
         const params = await desktopSessionCreateParams(cwd)
+
         // "Transfer to new session": carry the seed the gateway built (the
         // seeded summary + recent-tail messages) into a continuation branch
         // that nests under the source session and reuses its cwd/project.
         if (transfer) {
-          if (transfer.seed?.length) params.messages = transfer.seed
-          if (transfer.parentSessionId) params.parent_session_id = transfer.parentSessionId
+          if (transfer.seed?.length) {params.messages = transfer.seed}
+
+          if (transfer.parentSessionId) {params.parent_session_id = transfer.parentSessionId}
         }
+
         const created = await requestGateway<SessionCreateResponse>('session.create', params)
         const stored = created.stored_session_id ?? null
 
@@ -479,10 +482,13 @@ export function useSessionActions({
   const transferToNewSession = useCallback(async (): Promise<string | null> => {
     const currentMessages = $messages.get()
     const currentStoredId = selectedStoredSessionIdRef.current
+
     const seed = currentMessages
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => ({ role: m.role, content: chatMessageText(m) }))
+
     const preview = seed.find(s => s.content.trim())?.content ?? null
+
     return createBackendSessionForSend(preview, {
       seed,
       parentSessionId: currentStoredId
@@ -754,7 +760,7 @@ export function useSessionActions({
           const fetchContextBreakdownWarm = (sid: string, attempt: number) => {
             void requestGateway<ContextBreakdown>('session.context_breakdown', { session_id: sid })
               .then(breakdown => {
-                if (!isCurrentResume() || !breakdown) return
+                if (!isCurrentResume() || !breakdown) {return}
 
                 setCurrentUsage(current => ({
                   ...current,
@@ -1081,7 +1087,7 @@ export function useSessionActions({
         const fetchContextBreakdown = (sid: string, attempt: number) => {
           void requestGateway<ContextBreakdown>('session.context_breakdown', { session_id: sid })
             .then(breakdown => {
-              if (!isCurrentResume() || !breakdown) return
+              if (!isCurrentResume() || !breakdown) {return}
 
               setCurrentUsage(current => ({
                 ...current,
@@ -1466,22 +1472,28 @@ export function useSessionActions({
         // teardown may hold the state.db write lock briefly. Up to 3 attempts
         // with 500ms backoff covers the typical lock duration.
         let lastErr: unknown
+
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
             await deleteSession(storedSessionId, removed?.profile)
             lastErr = null
+
             break
           } catch (err) {
             lastErr = err
             const msg = err instanceof Error ? err.message : String(err)
+
             if (/^503:/.test(msg) && attempt < 2) {
               await new Promise(r => setTimeout(r, 500 * (attempt + 1)))
+
               continue
             }
+
             throw err
           }
         }
-        if (lastErr) throw lastErr
+
+        if (lastErr) {throw lastErr}
         clearQueuedPrompts(storedSessionId)
 
         if (closingRuntimeId) {

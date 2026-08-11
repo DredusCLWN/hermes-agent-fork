@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { getElevenLabsVoices, getHermesConfigSchema, saveHermesConfig } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
+import { queryClient } from '@/lib/query-client'
 import {
   $dataUrlReadMaxMb,
   clampDataUrlReadMaxMb,
@@ -31,9 +32,8 @@ import { enumOptionsFor, getNested, isExternalMemoryProvider, sectionFieldEntrie
 import { MemoryConnect } from './memory/connect'
 import { ProviderConfigPanel } from './memory/provider-config-panel'
 import { ModelSettings, ModelSettingsSkeleton } from './model-settings'
-import { EmptyState, ListRow, SettingsContent, SettingsSkeleton, ToggleRow } from './primitives'
+import { EmptyState, ListRow, SettingsContent, SettingsSkeleton } from './primitives'
 import { QuickEntrySettings } from './quick-entry-settings'
-import { queryClient } from '@/lib/query-client'
 
 // Module-level caches: survive component unmount/remount when switching to a
 // non-config tab (appearance, about, …) and back. React Query's gcTime: Infinity
@@ -76,6 +76,7 @@ export function ConfigSettings({
 }) {
   const { t } = useI18n()
   const c = t.settings.config
+
   // The editable draft is local (debounced autosave watches it), but it's seeded
   // from — and saved back through — the shared config cache, so edits are visible
   // in MCP/model surfaces and reopening the page doesn't reload-flash.
@@ -84,6 +85,7 @@ export function ConfigSettings({
   const [config, setConfig] = useState<HermesConfigRecord | null>(() =>
     queryClient.getQueryData<HermesConfigRecord>(HERMES_CONFIG_KEY) ?? _configCache ?? null
   )
+
   const { data: loadedConfig, isError: configLoadFailed, refetch: refetchConfig } = useHermesConfigRecord()
 
   const {
@@ -101,9 +103,11 @@ export function ConfigSettings({
   const [elevenLabsVoiceOptions, setElevenLabsVoiceOptions] = useState<string[] | null>(null)
   const [elevenLabsVoiceLabels, setElevenLabsVoiceLabels] = useState<Record<string, string>>({})
   const saveVersionRef = useRef(0)
+
   const savedDiscoverySignatureRef = useRef<string | undefined>(
     config ? repoDiscoveryPolicySignature(repoDiscoveryPolicyFromConfig(config)) : undefined
   )
+
   const [saveVersion, setSaveVersion] = useState(0)
 
   // Seed the local draft once, the first time the shared record lands.
@@ -116,6 +120,7 @@ export function ConfigSettings({
   useEffect(() => {
     if (loadedConfig) {
       _configCache = loadedConfig
+
       if (!configSeeded.current) {
         configSeeded.current = true
         savedDiscoverySignatureRef.current = repoDiscoveryPolicySignature(repoDiscoveryPolicyFromConfig(loadedConfig))
@@ -126,7 +131,7 @@ export function ConfigSettings({
 
   // Persist schema to module cache so a remount paints instantly even after
   // React Query GC'd the query observer data.
-  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
+   
   useEffect(() => {
     if (schemaResponse?.fields) {
       _schemaCache = schemaResponse.fields

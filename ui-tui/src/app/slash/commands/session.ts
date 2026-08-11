@@ -7,8 +7,8 @@ import type {
   ConfigSetResponse,
   SessionBranchResponse,
   SessionCompressResponse,
-  SlashExecResponse,
   SessionUsageResponse,
+  SlashExecResponse,
 } from '../../../gatewayTypes.js'
 import { fmtK } from '../../../lib/text.js'
 import type { PanelSection } from '../../../types.js'

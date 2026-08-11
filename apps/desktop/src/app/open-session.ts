@@ -132,6 +132,7 @@ export function openSession(
   // loads in main chat — the user expects the clicked session to appear in
   // the main area, not just focus a side pane. resumeSession closes the tile.
   const forceRoute = resolved === 'in-place' && focusResult === 'tile'
+
   if (needsRoute || forceRoute) {
     navigate(sessionRoute(storedSessionId))
   }

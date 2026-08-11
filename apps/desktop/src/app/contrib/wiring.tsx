@@ -37,8 +37,6 @@ import {
   $activeGatewayProfile,
   $freshSessionRequest,
   $profileScope,
-  ensureGatewayProfile,
-  newSessionInProfile,
   normalizeProfileKey,
   refreshActiveProfile
 } from '@/store/profile'

@@ -5,22 +5,22 @@
  * an interactive vis-network graph with filters, search, and node inspection.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  cn,
-  Button,
-  Input,
   Badge,
+  Button,
+  cn,
   Codicon,
-  StatusDot,
   host,
+  Input,
+  StatusDot,
   useValue,
 } from '@hermes/plugin-sdk'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
-  fetchStatus, fetchGraph,
-  buildGraph, cancelBuild, enhanceGraph, fetchModels,
-  type GraphNode, type GraphLink, type GraphStatus,
+  buildGraph, cancelBuild,
+  enhanceGraph, fetchGraph, fetchModels, fetchStatus,
+  type GraphLink, type GraphNode, type GraphStatus,
 } from './api'
 
 export function GraphCanvas() {
@@ -36,10 +36,12 @@ export function GraphCanvas() {
   const [nodes, setNodes] = useState<GraphNode[]>([])
   const [links, setLinks] = useState<GraphLink[]>([])
   const [selected, setSelected] = useState<GraphNode | null>(null)
+
   const [status, setStatus] = useState<GraphStatus>({
     status: 'loading', progress: 0, error: null,
     node_count: 0, edge_count: 0, community_count: 0, graph_exists: false,
   })
+
   const [visFailed, setVisFailed] = useState(false)
   const [backend, setBackend] = useState('ollama')
   const [modelName, setModelName] = useState('')
@@ -60,7 +62,7 @@ export function GraphCanvas() {
 
   // Fetch models when backend changes
   useEffect(() => {
-    if (!backend) return
+    if (!backend) {return}
     setModelsReady(false)
     setModelList([])
     setModelsError('')
@@ -69,6 +71,7 @@ export function GraphCanvas() {
         setModelList(data.models || [])
         setModelsLive(data.live || false)
         setModelsError(data.error || '')
+
         if (data.models?.length && !modelName) {
           setModelName(data.models[0])
         }
@@ -80,15 +83,18 @@ export function GraphCanvas() {
   // Status polling — restarts whenever build or enhance starts.
   useEffect(() => {
     fetchStatus().then(setStatus).catch(() => {})
-    if (status.status !== 'building' && status.status !== 'enhancing') return
+
+    if (status.status !== 'building' && status.status !== 'enhancing') {return}
 
     const timer = setInterval(async () => {
       try {
         const data = await fetchStatus()
         setStatus(data)
-        if (data.status !== 'building' && data.status !== 'enhancing') clearInterval(timer)
+
+        if (data.status !== 'building' && data.status !== 'enhancing') {clearInterval(timer)}
       } catch {}
     }, 2000)
+
     return () => clearInterval(timer)
   }, [status.status])
 
@@ -99,8 +105,9 @@ export function GraphCanvas() {
   // triggers a fresh build for the new cwd.
   const lastBuiltCwd = useRef<string>('')
   useEffect(() => {
-    if (!modelsReady || !effectiveCwd) return
-    if (autoBuildTriggered.current && lastBuiltCwd.current === effectiveCwd) return
+    if (!modelsReady || !effectiveCwd) {return}
+
+    if (autoBuildTriggered.current && lastBuiltCwd.current === effectiveCwd) {return}
 
     autoBuildTriggered.current = true
     lastBuiltCwd.current = effectiveCwd
@@ -111,7 +118,8 @@ export function GraphCanvas() {
     setSelected(null)
 
     const payload: Record<string, string> = { mode: 'ast', backend, cwd: effectiveCwd }
-    if (modelName) payload.model = modelName
+
+    if (modelName) {payload.model = modelName}
     buildGraph(payload).catch(() => {})
   }, [effectiveCwd, modelsReady, modelName, backend])
 
@@ -124,16 +132,19 @@ export function GraphCanvas() {
       // Normalize to the shape the UI reads (type/file/degree) so tooltips,
       // node sizes and the inspector show real values instead of blanks.
       const degreeByNode = new Map<string, number>()
+
       for (const l of data.links || []) {
         degreeByNode.set(l.source, (degreeByNode.get(l.source) ?? 0) + 1)
         degreeByNode.set(l.target, (degreeByNode.get(l.target) ?? 0) + 1)
       }
+
       const normNodes = rawNodes.map((n: GraphNode) => ({
         ...n,
         type: n.type ?? n.file_type,
         file: n.file ?? n.source_file,
         degree: degreeByNode.get(n.id) ?? 0,
       }))
+
       setNodes(normNodes)
       setLinks(data.links || [])
     } catch {}
@@ -158,11 +169,14 @@ export function GraphCanvas() {
   // vis-network creates its own canvas/DOM — React must not manage children
   // of the container div (causes removeChild crash).
   useEffect(() => {
-    if (!containerRef.current) return
+    if (!containerRef.current) {return}
 
     function initNetwork() {
       const vis = (window as any).vis
-      if (!vis?.Network) { setVisFailed(true); return }
+
+      if (!vis?.Network) { setVisFailed(true);
+
+ return }
 
       // Read theme tokens once
       const styles = getComputedStyle(document.documentElement)
@@ -239,7 +253,7 @@ export function GraphCanvas() {
     }
 
     return () => {
-      if (renderTimerRef.current) clearTimeout(renderTimerRef.current)
+      if (renderTimerRef.current) {clearTimeout(renderTimerRef.current)}
       networkRef.current?.destroy()
       networkRef.current = null
       nodesDataSetRef.current = null
@@ -255,9 +269,10 @@ export function GraphCanvas() {
   // Incremental node addition — animate nodes appearing one by one.
   // Optimized: uses DataSet.add() instead of recreating the network.
   useEffect(() => {
-    if (!nodesDataSetRef.current || !edgesDataSetRef.current || nodes.length === 0) return
+    if (!nodesDataSetRef.current || !edgesDataSetRef.current || nodes.length === 0) {return}
     const tc = themeColorsRef.current
-    if (!tc) return
+
+    if (!tc) {return}
 
     // Stop any in-flight batch from a previous run (e.g. a rebuild that fired
     // while this data was still streaming) so stale nodes can't land in the
@@ -277,6 +292,7 @@ export function GraphCanvas() {
       const comm = n.community ?? n.cluster ?? 0
       const color = tc.palette[comm % tc.palette.length]
       const degree = n.degree_centrality ?? n.degree ?? 1
+
       return {
         id: n.id,
         label: n.label ?? n.id,
@@ -310,12 +326,14 @@ export function GraphCanvas() {
     let nodeIndex = 0
 
     function addBatch() {
-      if (!nodesDataSetRef.current) return
+      if (!nodesDataSetRef.current) {return}
 
       const batch = visNodes.slice(nodeIndex, nodeIndex + batchSize)
+
       if (batch.length > 0) {
         nodesDataSetRef.current.add(batch)
       }
+
       nodeIndex += batchSize
       setRenderingProgress(Math.min(100, Math.round((nodeIndex / totalNodes) * 100)))
 
@@ -337,8 +355,10 @@ export function GraphCanvas() {
 
   const handleBuild = () => {
     const payload: Record<string, string> = { mode: 'ast', backend }
-    if (modelName) payload.model = modelName
-    if (effectiveCwd) payload.cwd = effectiveCwd
+
+    if (modelName) {payload.model = modelName}
+
+    if (effectiveCwd) {payload.cwd = effectiveCwd}
     setStatus(prev => ({ ...prev, status: 'building', progress: 0, error: null }))
     buildGraph(payload).catch(() => {})
   }
@@ -349,7 +369,7 @@ export function GraphCanvas() {
   }
 
   const handleEnhance = () => {
-    if (!modelName) return
+    if (!modelName) {return}
     setStatus(prev => ({ ...prev, status: 'enhancing', progress: 0, error: null }))
     enhanceGraph(modelName).catch(() => {})
   }
@@ -398,23 +418,23 @@ export function GraphCanvas() {
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          <Badge variant={badgeVariant[status.status] ?? 'outline'} size="default">
+          <Badge size="default" variant={badgeVariant[status.status] ?? 'outline'}>
             <StatusDot tone={statusTone[status.status] ?? 'muted'} />
             {status.status}
           </Badge>
           <Button
             onClick={() => setSettingsOpen(!settingsOpen)}
-            variant="ghost"
             size="icon-sm"
             title="Settings"
+            variant="ghost"
           >
             <Codicon name="settings-gear" />
           </Button>
           {isBusy ? (
             <Button
               onClick={handleCancel}
-              variant="destructive"
               size="sm"
+              variant="destructive"
             >
               <Codicon name="stop" />
               Cancel
@@ -423,8 +443,8 @@ export function GraphCanvas() {
             <div className="flex items-center gap-1.5">
               <Button
                 onClick={handleBuild}
-                variant="secondary"
                 size="sm"
+                variant="secondary"
               >
                 <Codicon name="refresh" />
                 Rebuild
@@ -432,9 +452,9 @@ export function GraphCanvas() {
               {isReady && modelsLive && !!modelName && (
                 <Button
                   onClick={handleEnhance}
-                  variant="ghost"
                   size="sm"
                   title="Enhance graph with local LLM (Ollama)"
+                  variant="ghost"
                 >
                   <Codicon name="sparkle" />
                   Enhance
@@ -457,9 +477,9 @@ export function GraphCanvas() {
           <div className="flex items-center gap-1">
             <span style={{ color: 'var(--ui-text-tertiary)' }}>Backend:</span>
             <select
-              value={backend}
-              onChange={(e) => { setBackend(e.target.value); setModelName('') }}
               className="graphify-select"
+              onChange={(e) => { setBackend(e.target.value); setModelName('') }}
+              value={backend}
             >
               {['ollama', 'openai', 'claude', 'deepseek', 'gemini', 'kimi'].map((b) => (
                 <option key={b} value={b}>{b}</option>
@@ -470,10 +490,10 @@ export function GraphCanvas() {
             <span style={{ color: 'var(--ui-text-tertiary)' }}>Model:</span>
             {modelList.length > 0 ? (
               <select
-                value={modelName}
-                onChange={(e) => setModelName(e.target.value)}
                 className="graphify-select"
+                onChange={(e) => setModelName(e.target.value)}
                 style={{ minWidth: '8rem' }}
+                value={modelName}
               >
                 <option value="">default</option>
                 {modelList.map((m) => (
@@ -482,10 +502,10 @@ export function GraphCanvas() {
               </select>
             ) : (
               <Input
+                className="w-32"
+                onChange={(e: any) => setModelName(e.target.value)}
                 placeholder="model name"
                 value={modelName}
-                onChange={(e: any) => setModelName(e.target.value)}
-                className="w-32"
               />
             )}
           </div>
@@ -503,11 +523,11 @@ export function GraphCanvas() {
 
       {/* Status bar */}
       <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--ui-text-tertiary)' }}>
-        <Badge variant="outline" size="xs">{status.node_count} nodes</Badge>
-        <Badge variant="outline" size="xs">{status.edge_count} edges</Badge>
-        <Badge variant="outline" size="xs">{status.community_count} communities</Badge>
+        <Badge size="xs" variant="outline">{status.node_count} nodes</Badge>
+        <Badge size="xs" variant="outline">{status.edge_count} edges</Badge>
+        <Badge size="xs" variant="outline">{status.community_count} communities</Badge>
         {status.backend && (
-          <Badge variant="muted" size="xs">
+          <Badge size="xs" variant="muted">
             {status.backend}{status.model ? `/${status.model}` : ''}
           </Badge>
         )}
@@ -679,18 +699,18 @@ export function GraphCanvas() {
         </div>
         <div className="w-64 shrink-0 overflow-y-auto">
           {selected ? (
-            <NodeInspector node={selected} links={links} onClose={() => setSelected(null)} />
+            <NodeInspector links={links} node={selected} onClose={() => setSelected(null)} />
           ) : (
-            <GodNodesPanel nodes={nodes} links={links} />
+            <GodNodesPanel links={links} nodes={nodes} />
           )}
           <ProjectSelector
-            projects={projects}
             activeCwd={activeCwd}
-            selectedProjectCwd={selectedProjectCwd}
             onSelect={(cwd) => {
               setSelectedProjectCwd(cwd)
               autoBuildTriggered.current = false
             }}
+            projects={projects}
+            selectedProjectCwd={selectedProjectCwd}
           />
         </div>
       </div>
@@ -719,7 +739,7 @@ function NodeInspector({ node, links, onClose }: {
         style={{ borderBottom: '1px solid var(--ui-stroke-secondary)' }}
       >
         <span className="text-sm font-semibold">{node.label ?? node.id}</span>
-        <Button size="icon" onClick={onClose}>×</Button>
+        <Button onClick={onClose} size="icon">×</Button>
       </div>
       <div className="space-y-2 p-3 text-xs">
         <div><strong>Type: </strong>{node.type ?? 'unknown'}</div>
@@ -755,20 +775,25 @@ function NodeInspector({ node, links, onClose }: {
 function GodNodesPanel({ nodes, links }: { nodes: GraphNode[]; links: GraphLink[] }) {
   const sorted = useMemo(() => {
     const degreeMap = new Map<string, number>()
+
     for (const l of links) {
       degreeMap.set(l.source, (degreeMap.get(l.source) ?? 0) + 1)
       degreeMap.set(l.target, (degreeMap.get(l.target) ?? 0) + 1)
     }
+
     return [...nodes]
       .sort((a, b) => (degreeMap.get(b.id) ?? 0) - (degreeMap.get(a.id) ?? 0))
       .slice(0, 10)
   }, [nodes, links])
+
   const degreeMap = useMemo(() => {
     const m = new Map<string, number>()
+
     for (const l of links) {
       m.set(l.source, (m.get(l.source) ?? 0) + 1)
       m.set(l.target, (m.get(l.target) ?? 0) + 1)
     }
+
     return m
   }, [links])
 
@@ -786,11 +811,11 @@ function GodNodesPanel({ nodes, links }: { nodes: GraphNode[]; links: GraphLink[
       <div className="space-y-1 p-3 text-xs">
         {sorted.map((n, i) => (
           <div
-            key={n.id}
             className="flex cursor-pointer items-center justify-between py-0.5"
-            style={{ transition: 'background 0.1s' }}
+            key={n.id}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--ui-row-hover-background)' }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+            style={{ transition: 'background 0.1s' }}
           >
             <span className="truncate">{i + 1}. {n.label ?? n.id}</span>
             <span className="ml-2 shrink-0" style={{ color: 'var(--ui-text-tertiary)' }}>
@@ -825,12 +850,13 @@ function ProjectSelector({ projects, activeCwd, selectedProjectCwd, onSelect }: 
         const cwd = (p.primary_path ?? p.folders[0]?.path ?? '').trim()
         const isActive = cwd.toLowerCase() === activeCwdTrim
         const isSelected = cwd === selectedProjectCwd
+
         return { id: p.id, name: p.name || p.id, cwd, isActive, isSelected }
       })
       .filter(e => e.cwd)
   }, [projects, activeCwdTrim, selectedProjectCwd])
 
-  if (entries.length === 0) return null
+  if (entries.length === 0) {return null}
 
   return (
     <div
@@ -846,8 +872,15 @@ function ProjectSelector({ projects, activeCwd, selectedProjectCwd, onSelect }: 
       <div className="space-y-1 p-2 text-xs">
         {entries.map(e => (
           <div
-            key={e.id}
             className="flex cursor-pointer items-center gap-2 rounded px-2 py-1"
+            key={e.id}
+            onClick={() => onSelect(e.cwd)}
+            onMouseEnter={(ev) => {
+              if (!e.isSelected && !e.isActive) {ev.currentTarget.style.background = 'var(--ui-row-hover-background)'}
+            }}
+            onMouseLeave={(ev) => {
+              if (!e.isSelected && !e.isActive) {ev.currentTarget.style.background = 'transparent'}
+            }}
             style={{
               background: e.isSelected
                 ? 'var(--ui-accent-soft, color-mix(in srgb, var(--ui-accent) 12%, transparent))'
@@ -856,13 +889,6 @@ function ProjectSelector({ projects, activeCwd, selectedProjectCwd, onSelect }: 
                   : 'transparent',
               transition: 'background 0.1s',
             }}
-            onMouseEnter={(ev) => {
-              if (!e.isSelected && !e.isActive) ev.currentTarget.style.background = 'var(--ui-row-hover-background)'
-            }}
-            onMouseLeave={(ev) => {
-              if (!e.isSelected && !e.isActive) ev.currentTarget.style.background = 'transparent'
-            }}
-            onClick={() => onSelect(e.cwd)}
           >
             <span className="truncate" style={{ color: e.isSelected ? 'var(--ui-accent)' : 'var(--ui-text-primary)' }}>
               {e.name}

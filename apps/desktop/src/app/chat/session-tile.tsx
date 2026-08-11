@@ -21,10 +21,10 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'r
 import { useNavigate } from 'react-router'
 
 import { useGatewayRequest } from '@/app/gateway/hooks/use-gateway-request'
+import { sessionRoute } from '@/app/routes'
 import { useModelControls } from '@/app/session/hooks/use-model-controls'
 import { blobToDataUrl } from '@/app/session/hooks/use-prompt-actions/utils'
 import { resolveStoredSession } from '@/app/session/hooks/use-session-actions/utils'
-import { sessionRoute } from '@/app/routes'
 import { ModelMenuPanel } from '@/app/shell/model-menu-panel'
 import { formatRefValue } from '@/components/assistant-ui/directive-text'
 import { CenteredThreadSpinner } from '@/components/assistant-ui/thread/status'
@@ -222,7 +222,8 @@ function TileChat({
           onTranscribeAudio={tileTranscribeAudio}
           onTransfer={useCallback(async () => {
             const storedId = await actions.transferToNewSession()
-            if (storedId) navigate(sessionRoute(storedId), { replace: true })
+
+            if (storedId) {navigate(sessionRoute(storedId), { replace: true })}
           }, [actions, navigate])}
         />
       </ComposerScopeProvider>

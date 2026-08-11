@@ -103,6 +103,7 @@ function attachmentPathNeedsUpload(path: string, backendCwd?: null | string, ter
   if (CONTAINER_TERMINAL_BACKENDS.has((terminalBackend || '').trim().toLowerCase())) {
     return true
   }
+
   return WINDOWS_ABSOLUTE_PATH_RE.test(path.trim()) && POSIX_ABSOLUTE_PATH_RE.test(backendCwd?.trim() || '')
 }
 

@@ -25,9 +25,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { getSessionMessages, renameSession } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { formatChatLog, toChatMessages } from '@/lib/chat-messages'
 import { triggerHaptic } from '@/lib/haptics'
 import { PROFILE_SWATCHES } from '@/lib/profile-color'
-import { formatChatLog, toChatMessages } from '@/lib/chat-messages'
 import { exportSession } from '@/lib/session-export'
 import { activeGateway } from '@/store/gateway'
 import { notify, notifyError } from '@/store/notifications'
@@ -405,6 +405,7 @@ function useSessionActions({
         onCopyError={err => notifyError(err, r.copyLogFailed)}
         text={async () => {
           const { messages } = await getSessionMessages(sessionId, profile)
+
           return formatChatLog(toChatMessages(messages))
         }}
       />

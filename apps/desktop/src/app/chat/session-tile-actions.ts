@@ -480,6 +480,7 @@ export function useSessionTileActions({ runtimeId, scope, storedSessionId }: Ses
     const created = await requestGateway<{ session_id: string; stored_session_id?: string }>('session.create', {
       cwd: readState()?.cwd ?? null
     }).catch(() => null)
+
     return created?.stored_session_id ?? created?.session_id ?? null
   }, [readState, requestGateway])
 

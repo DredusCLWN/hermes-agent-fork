@@ -26,8 +26,6 @@ import type {
   HermesConfig,
   HermesConfigRecord,
   LogsResponse,
-  WebProxyActionResponse,
-  WebProxyStatusResponse,
   McpCatalogResponse,
   McpServerSummary,
   MemoryProviderConfig,
@@ -71,7 +69,9 @@ import type {
   WebhookCreatePayload,
   WebhookCreateResponse,
   WebhookEnableResponse,
-  WebhooksResponse
+  WebhooksResponse,
+  WebProxyActionResponse,
+  WebProxyStatusResponse
 } from '@/types/hermes'
 
 // Desktop startup fires a burst of read-only data calls (config, profiles,

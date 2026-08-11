@@ -8,8 +8,6 @@
  * Honest, no flattery. Includes a live countdown to the next auto-rebuild.
  */
 
-import { useEffect, useState } from 'react'
-
 import {
   Badge,
   Button,
@@ -21,13 +19,14 @@ import {
   host,
   icons,
   type PaletteContribution,
-  ROUTES_AREA,
   type RouteContribution,
+  ROUTES_AREA,
   SIDEBAR_NAV_AREA,
   type SidebarNavContribution,
   useQueryClient,
   useValue
 } from '@hermes/plugin-sdk'
+import { useEffect, useState } from 'react'
 
 import {
   bindApi,
@@ -42,6 +41,7 @@ import {
 function todayLabel(): string {
   const d = mskNow()
   const p = (n: number) => String(n).padStart(2, '0')
+
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
@@ -57,12 +57,14 @@ function CountdownRing() {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
+
     return () => clearInterval(t)
   }, [])
 
   const r = new Date(now + MSK_MS)
   const t = new Date(r.getFullYear(), r.getMonth(), r.getDate(), 8, 0, 0, 0)
-  if (r.getTime() >= t.getTime()) t.setDate(t.getDate() + 1)
+
+  if (r.getTime() >= t.getTime()) {t.setDate(t.getDate() + 1)}
   const remaining = t.getTime() - r.getTime()
   const dayFrac = 1 - remaining / (24 * 60 * 60 * 1000)
 
@@ -74,18 +76,18 @@ function CountdownRing() {
 
   return (
     <div className="flex items-center gap-2.5 text-xs">
-      <svg width="34" height="34" viewBox="0 0 34 34" className="shrink-0 -rotate-90">
-        <circle cx="17" cy="17" r={R} fill="none" stroke="var(--dt-stroke-tertiary)" strokeWidth="3.5" />
+      <svg className="shrink-0 -rotate-90" height="34" viewBox="0 0 34 34" width="34">
+        <circle cx="17" cy="17" fill="none" r={R} stroke="var(--dt-stroke-tertiary)" strokeWidth="3.5" />
         <circle
           cx="17"
           cy="17"
-          r={R}
           fill="none"
+          r={R}
           stroke="var(--ui-accent)"
-          strokeWidth="3.5"
-          strokeLinecap="round"
           strokeDasharray={C}
           strokeDashoffset={(1 - dayFrac) * C}
+          strokeLinecap="round"
+          strokeWidth="3.5"
         />
       </svg>
       <span className="tabular-nums text-muted-foreground">
@@ -109,11 +111,13 @@ function ReportPanel() {
   const dueToday = view.kind === 'due'
 
   async function onRefresh(): Promise<void> {
-    if (generating) return
+    if (generating) {return}
+
     // До 08:00 МСК нового дня не перегенерируем (показываем вчерашний).
-    if (!fresh && !dueToday) return
+    if (!fresh && !dueToday) {return}
     setGenerating(true)
     setError(null)
+
     try {
       const ctx: MemoryContext = await gatherContext()
       const report = await generateReport(sessionId || '', ctx)
@@ -136,18 +140,18 @@ function ReportPanel() {
     <div className="flex h-full flex-col gap-3 p-4">
       <header className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <Codicon name="calendar" className="text-muted-foreground" />
+          <Codicon className="text-muted-foreground" name="calendar" />
           {title}
           {!fresh && cached && <Badge variant="muted">вчера · до 08:00 МСК</Badge>}
           {fresh && <Badge>сегодня</Badge>}
         </div>
         <Button
-          variant="ghost"
-          size="sm"
-          disabled={generating || view.kind === 'stale'}
-          title={view.kind === 'stale' ? 'Новый отчёт только после 08:00 МСК' : 'Сгенерировать / обновить отчёт'}
-          onClick={onRefresh}
           className={cn('shrink-0')}
+          disabled={generating || view.kind === 'stale'}
+          onClick={onRefresh}
+          size="sm"
+          title={view.kind === 'stale' ? 'Новый отчёт только после 08:00 МСК' : 'Сгенерировать / обновить отчёт'}
+          variant="ghost"
         >
           {generating ? <icons.Loader2Icon className="animate-spin" size={14} /> : <icons.RefreshCwIcon />}
           Обновить
@@ -159,7 +163,7 @@ function ReportPanel() {
       </div>
 
       {generating && <p className="text-xs text-muted-foreground">Собираю контекст из памяти и вчерашних сессий…</p>}
-      {error && <ErrorState title="Не удалось собрать отчёт" description={error} />}
+      {error && <ErrorState description={error} title="Не удалось собрать отчёт" />}
 
       {!error && cached?.report && (
         <article className="max-w-[860px] flex-1 select-text overflow-y-auto rounded-lg border bg-muted/40 p-4 font-sans text-sm leading-relaxed whitespace-pre-wrap text-foreground">
@@ -169,8 +173,8 @@ function ReportPanel() {
 
       {!error && !cached?.report && !generating && (
         <EmptyState
-          title="Отчёт на сегодня ещё не готов"
           description="Сгенерируется автоматически после 08:00 МСК или по кнопке «Обновить»."
+          title="Отчёт на сегодня ещё не готов"
         />
       )}
     </div>

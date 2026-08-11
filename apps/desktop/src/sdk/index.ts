@@ -26,11 +26,11 @@ import { getLogs, getStatus } from '@/hermes'
 import { $gateway } from '@/store/gateway'
 import { notify, notifyError } from '@/store/notifications'
 import { $activeGatewayProfile } from '@/store/profile'
+import { $projects } from '@/store/projects'
 import { $activeSessionId, $currentCwd, $currentModel, $gatewayState } from '@/store/session'
 import { $fileTreeCwd } from '@/store/session-states'
-import { $projects } from '@/store/projects'
-import type { ProjectInfo } from '@/types/hermes'
 import { runGatewayRestart } from '@/store/system-actions'
+import type { ProjectInfo } from '@/types/hermes'
 
 // -- state: readonly views over the app's live atoms -------------------------
 

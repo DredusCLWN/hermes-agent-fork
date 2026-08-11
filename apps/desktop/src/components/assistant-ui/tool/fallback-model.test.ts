@@ -97,6 +97,7 @@ describe('buildToolView terminal exit-code status', () => {
         // row as alive and keeps the gerund "Running…" title despite a result.
         const withCommand = (result: Record<string, unknown>) =>
           buildToolView(part({ args: { command: 'sleep 40' }, result, toolName: 'terminal' }), '')
+
         const live = withCommand({ status: 'timeout', session_id: 'proc_1', exit_code: null })
         expect(live.processAlive).toBe(true)
         expect(live.title).toContain('Running')

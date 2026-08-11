@@ -376,6 +376,7 @@ function ToolEntry({ part }: ToolEntryProps) {
   // so they paint statically without a settle cascade. The wrapping group
   // handles its own enter animation, so embedded children skip it.
   const enterRef = useEnterAnimation(messageRunning && !embedded, `tool-entry:${disclosureId}`)
+
   // A foreground terminal command may return a partial result with status
   // 'timeout' or 'timeout_exceeded' — the process is still alive but the
   // agent must decide what to do. The timer stays visible (frozen at the
@@ -386,21 +387,27 @@ function ToolEntry({ part }: ToolEntryProps) {
     if (toolName !== 'terminal' || result === undefined || typeof result !== 'object' || result === null) {
       return false
     }
+
     const status = (result as { status?: unknown }).status
+
     return status === 'timeout' || status === 'timeout_exceeded'
   }, [toolName, result])
+
   const timerActive = isPending
   const elapsed = useElapsedSeconds(timerActive, `tool:${disclosureId}`)
 
   // For terminal tool: extract per-command timeout to display "elapsed/max".
   // The agent can override the default (120s from config) via the timeout param.
   const maxSeconds = useMemo(() => {
-    if (toolName !== 'terminal') return undefined
+    if (toolName !== 'terminal') {return undefined}
     const argsRecord = typeof args === 'object' && args !== null ? args as Record<string, unknown> : {}
+
     const cmdTimeout = typeof argsRecord.timeout === 'number' && argsRecord.timeout > 0
       ? argsRecord.timeout
       : 120
+
     const isBackground = argsRecord.background === true
+
     return isBackground ? undefined : cmdTimeout
   }, [toolName, args])
 
@@ -516,7 +523,7 @@ function ToolEntry({ part }: ToolEntryProps) {
   // top-right, where it can't fight the caret for the right edge.
   const trailing =
     (isPending || terminalAlive) && !embedded
-      ? <ActivityTimerText className={SCAFFOLD_META_CLASS} seconds={elapsed} maxSeconds={maxSeconds} />
+      ? <ActivityTimerText className={SCAFFOLD_META_CLASS} maxSeconds={maxSeconds} seconds={elapsed} />
       : undefined
 
   // Once a turn has settled, a hover/focus-revealed dismiss lets the user clear

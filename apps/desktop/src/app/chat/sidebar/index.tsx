@@ -5,7 +5,6 @@ import type * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router'
 
-
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -1493,7 +1492,7 @@ export function ChatSidebar({
                     label={group.label}
                     labelIcon={
 <span className="flex size-4 shrink-0 items-center justify-center rounded-[4px] bg-foreground/10 text-foreground/70">
-                        <Codicon name="globe" className="size-3" />
+                        <Codicon className="size-3" name="globe" />
                       </span>
                     }
                     onArchiveSession={onArchiveSession}

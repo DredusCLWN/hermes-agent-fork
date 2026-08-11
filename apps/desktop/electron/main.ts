@@ -10890,7 +10890,9 @@ ipcMain.handle(
       headers: options.headers || {},
       body: options.body,
     })
+
     const text = await res.text()
+
     return { ok: res.ok, status: res.status, text }
   }
 )

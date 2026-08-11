@@ -9,8 +9,9 @@ const _SPAM_PATTERNS = [/^useClientLookup: Clamped stale index/]
 console.log = (...args: unknown[]) => {
   if (args.length > 0 && typeof args[0] === 'string') {
     for (const pattern of _SPAM_PATTERNS) {
-      if (pattern.test(args[0])) return
+      if (pattern.test(args[0])) {return}
     }
   }
+
   _originalLog.apply(console, args as [unknown, ...unknown[]])
 }

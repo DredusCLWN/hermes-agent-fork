@@ -9,6 +9,7 @@ import {
 import { useStore } from '@nanostores/react'
 import { type FC, useCallback, useMemo } from 'react'
 
+import { useSessionView } from '@/app/chat/session-view'
 import { ChangedFilesCard } from '@/components/assistant-ui/thread/changed-files-card'
 import {
   contentHasVisibleText,
@@ -20,18 +21,15 @@ import { ResponseLoadingIndicator, StreamStallIndicator } from '@/components/ass
 import { formatMessageTimestamp } from '@/components/assistant-ui/thread/timestamp'
 import { TooltipIconButton } from '@/components/assistant-ui/tooltip-icon-button'
 import { PreviewAttachment } from '@/components/chat/preview-attachment'
-import { useSessionView } from '@/app/chat/session-view'
 import { Codicon } from '@/components/ui/codicon'
 import { CopyButton } from '@/components/ui/copy-button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { BarChart3, GitForkIcon, RefreshCwIcon, XIcon, Zap } from '@/lib/icons'
 import { extractPreviewTargets } from '@/lib/preview-targets'
 import { formatAgo } from '@/lib/time'
 import { useEnterAnimation } from '@/lib/use-enter-animation'
-import { cn } from '@/lib/utils'
-import { notifyError } from '@/store/notifications'
 import type { UsageStats } from '@/types/hermes'
 
 // Stable empty identity for the settled-parts selector — a fresh [] per render
@@ -163,24 +161,31 @@ export const AssistantMessage: FC<{
 }
 
 function _fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  if (n >= 1_000_000) {return `${(n / 1_000_000).toFixed(1)}M`}
+
+  if (n >= 1000) {return `${(n / 1000).toFixed(1)}k`}
+
   return String(n)
 }
 
 function _fmtCost(usd: number): string {
-  if (usd <= 0) return '$0'
-  if (usd >= 0.01) return `$${usd.toFixed(4)}`
-  if (usd >= 0.0001) return `$${usd.toFixed(6)}`
+  if (usd <= 0) {return '$0'}
+
+  if (usd >= 0.01) {return `$${usd.toFixed(4)}`}
+
+  if (usd >= 0.0001) {return `$${usd.toFixed(6)}`}
+
   return `$${usd.toExponential(2)}`
 }
 
 const TokenSavings: FC = () => {
   const view = useSessionView()
   const usage = useStore(view.$usage) as UsageStats | null
-  if (!usage?.savings || usage.savings <= 0) return null
+
+  if (!usage?.savings || usage.savings <= 0) {return null}
 
   const breakdown = usage.savings_breakdown ?? {}
+
   const items = [
     { key: 'cache', label: 'Cache', value: breakdown.cache ?? 0 },
     { key: 'caveman', label: 'Caveman', value: breakdown.caveman ?? 0 },
@@ -212,7 +217,7 @@ const TokenSavings: FC = () => {
           <span>{_fmtTokens(usage.savings)} saved</span>
         </button>
       </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={8} align="start" rich className="w-72 p-3">
+      <TooltipContent align="start" className="w-72 p-3" rich side="top" sideOffset={8}>
         <p className="mb-2 text-[0.6875rem] font-medium text-foreground">
           Token savings
         </p>
@@ -235,7 +240,8 @@ const TokenSavings: FC = () => {
 const TokenSpending: FC = () => {
   const view = useSessionView()
   const usage = useStore(view.$usage) as UsageStats | null
-  if (!usage || !usage.total) return null
+
+  if (!usage || !usage.total) {return null}
 
   const hasContext = usage.context_used != null && usage.context_max != null && usage.context_max > 0
   const reasoningInOutput = (usage.reasoning ?? 0) > 0 && (usage.input + usage.output) > usage.total
@@ -251,7 +257,7 @@ const TokenSpending: FC = () => {
           <span>{_fmtTokens(usage.total)}</span>
         </button>
       </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={8} align="start" rich className="w-80 p-3">
+      <TooltipContent align="start" className="w-80 p-3" rich side="top" sideOffset={8}>
         <div className="mb-2 flex items-baseline justify-between gap-2">
           <p className="text-[0.6875rem] font-medium text-foreground">Token spending</p>
           {usage.model ? (

@@ -16,6 +16,7 @@ let rest: null | Rest = null
 
 export function bindApi(r: Rest): () => void {
   rest = r
+
   return () => {
     rest = null
   }
@@ -36,6 +37,7 @@ export function mskNow(): Date {
 
 export function dayKey(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0')
+
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
@@ -56,6 +58,7 @@ export interface CachedReport {
 function loadCache(): CachedReport | null {
   try {
     const raw = localStorage.getItem(CACHE_KEY)
+
     return raw ? (JSON.parse(raw) as CachedReport) : null
   } catch {
     return null
@@ -97,15 +100,19 @@ interface SessionListResp {
 
 async function waitGateway(timeoutMs = 5000): Promise<boolean> {
   const start = Date.now()
+
   while (Date.now() - start < timeoutMs) {
     try {
           const st = (host.state.gateway as { get(): string }).get()
-          if (st === 'open') return true
+
+          if (st === 'open') {return true}
         } catch {
       /* atom may not be ready — keep waiting */
     }
+
     await new Promise((r) => setTimeout(r, 200))
   }
+
   return false
 }
 
@@ -115,8 +122,10 @@ export async function gatherContext(): Promise<MemoryContext> {
   const yesterdayStart = todayStart - DAY_MS
 
   let memory = ''
+
   try {
     const resp = await call<MemoryResp>('/memory')
+
     if (resp?.memory?.length) {
       memory = resp.memory
         .map((e) => `\n### ${e.name ?? 'Memory'}\n${e.content ?? ''}`)
@@ -129,14 +138,19 @@ export async function gatherContext(): Promise<MemoryContext> {
 
   let yesterday = ''
   let notes = ''
+
   try {
     await waitGateway()
     const resp = await host.request<SessionListResp>('session.list', { limit: 200 })
+
     const rows = (resp?.sessions || []).filter((row) => {
       let ts = row.started_at || 0
-      if (ts && ts < 1e12) ts *= 1000 // seconds -> ms
+
+      if (ts && ts < 1e12) {ts *= 1000} // seconds -> ms
+
       return ts >= yesterdayStart && ts < todayStart
     })
+
     yesterday = rows
       .map((row) => `- ${row.title || '(без темы)'}${row.preview ? ` — «${row.preview}»` : ''}`)
       .join('\n')
@@ -152,6 +166,7 @@ export async function gatherContext(): Promise<MemoryContext> {
 export function buildPrompt(ctx: MemoryContext): { instructions: string; input: string } {
   const d = mskNow()
   const dateStr = `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`
+
   const instructions = [
     'Ты пишешь личный ежедневный отчёт для владельца Hermes. Язык: русский.',
     'Стиль: честный, прямой, БЕЗ подхалимажа. Оценивай строго по данным.',
@@ -182,6 +197,7 @@ export function buildPrompt(ctx: MemoryContext): { instructions: string; input: 
 
 export async function generateReport(sessionId: string, ctx: MemoryContext): Promise<string> {
   const { instructions, input } = buildPrompt(ctx)
+
   const res = await host.request<{ output?: string; text?: string }>('llm.oneshot', {
     session_id: sessionId || undefined,
     instructions,
@@ -194,8 +210,11 @@ export async function generateReport(sessionId: string, ctx: MemoryContext): Pro
     // десктоп убивает запрос раньше, чем придёт ответ).
     timeoutMs: 180_000
   })
+
   const text = (res?.output || res?.text || '').trim()
-  if (!text) throw new Error('Модель вернула пустой ответ')
+
+  if (!text) {throw new Error('Модель вернула пустой ответ')}
+
   return text
 }
 
@@ -205,12 +224,15 @@ export function statusForToday(): { loaded: CachedReport | null; kind: 'fresh' |
   const today = mskNow()
   const key = dayKey(today)
   const cached = loadCache()
+
   if (cached?.date === key) {
     return { loaded: cached, kind: 'fresh' }
   }
+
   if (isAfterEight(today)) {
     return { loaded: cached, kind: 'due' }
   }
+
   return { loaded: cached, kind: cached?.report ? 'stale' : 'none' }
 }
 

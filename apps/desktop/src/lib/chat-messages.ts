@@ -196,7 +196,7 @@ export function formatChatLog(messages: ChatMessage[]): string {
   const lines: string[] = []
 
   for (const message of messages) {
-    if (message.hidden) continue
+    if (message.hidden) {continue}
 
     const role = message.role.toUpperCase()
     const timestamp = message.timestamp ? new Date(message.timestamp).toISOString() : ''
@@ -207,22 +207,34 @@ export function formatChatLog(messages: ChatMessage[]): string {
       switch (part.type) {
         case 'text':
           lines.push(part.text)
+
           break
+
         case 'reasoning':
           lines.push(`💭 Reasoning:\n${part.text}`)
+
           break
+
         case 'tool-call':
           lines.push(formatToolCallPart(part))
+
           break
+
         case 'image':
           lines.push('[image]')
+
           break
+
         case 'file':
           lines.push(`[file: ${part.filename ?? 'unnamed'}]`)
+
           break
+
         case 'source':
           lines.push(`[source: ${part.title ?? part.url}]`)
+
           break
+
         default:
           break
       }

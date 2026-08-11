@@ -350,9 +350,11 @@ export function mergeSessionPage(
 
   // Build a lookup of incoming sessions by id and lineage root for O(1) match
   const incomingById = new Map(incoming.map(s => [s.id, s]))
+
   const incomingByLineage = new Map(
     incoming.filter(s => s._lineage_root_id).map(s => [s._lineage_root_id, s])
   )
+
   const incomingUsed = new Set<string>()
 
   // Preserve the PREVIOUS order: map over previous and replace each row with

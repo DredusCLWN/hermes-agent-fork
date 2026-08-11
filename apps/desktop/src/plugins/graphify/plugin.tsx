@@ -9,8 +9,6 @@
  */
 
 import {
-  cn,
-  Codicon,
   type HermesPlugin,
   host,
   type PaletteContribution,
@@ -20,8 +18,8 @@ import {
   type SidebarNavContribution,
 } from '@hermes/plugin-sdk'
 
-import { GraphCanvas } from './graph-canvas'
 import { bindApi } from './api'
+import { GraphCanvas } from './graph-canvas'
 
 const plugin: HermesPlugin = {
   id: 'graphify',

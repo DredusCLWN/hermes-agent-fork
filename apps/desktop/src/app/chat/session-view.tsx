@@ -3,7 +3,6 @@ import { createContext, useContext } from 'react'
 
 import type { ClientSessionState } from '@/app/types'
 import type { ChatMessage } from '@/lib/chat-messages'
-import type { UsageStats } from '@/types/hermes'
 import {
   $activeSessionId,
   $awaitingResponse,
@@ -18,6 +17,7 @@ import {
   $selectedStoredSessionId
 } from '@/store/session'
 import { $sessionStates } from '@/store/session-states'
+import type { UsageStats } from '@/types/hermes'
 
 import { lastVisibleMessageIsUser } from './thread-loading'
 

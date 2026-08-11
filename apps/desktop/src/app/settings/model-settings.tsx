@@ -240,11 +240,13 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
 
   const refresh = useCallback(async ({ replaceSelection = false }: { replaceSelection?: boolean } = {}) => {
     const epoch = profileEpoch.current
+
     // Only show skeleton on first load (no cached data). Background refreshes
     // keep the existing UI visible while fetching — no skeleton flash.
     if (!_modelCache) {
       setLoading(true)
     }
+
     setError('')
 
     try {
@@ -274,6 +276,7 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
       setMoa(moaModels)
 
       let nextPreset = ''
+
       if (moaModels) {
         nextPreset = selectedMoaPreset && moaModels.presets[selectedMoaPreset]
           ? selectedMoaPreset

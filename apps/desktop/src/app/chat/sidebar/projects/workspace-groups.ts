@@ -712,9 +712,11 @@ export function overlayLiveLanes(
   // ends up in each. Keep it in the first repo only, then drop lanes emptied by
   // the dedup (but preserve lanes that were already empty — they're structural).
   const seenSessionIds = new Set<string>()
+
   const emptyOnInput = new Set(
     repos.flatMap(r => r.groups.filter(g => !g.sessions.length).map(g => g.id))
   )
+
   const dedupedRepos = repos.map(repo => {
     if (!repo.groups.some(g => g.sessions.some(s => seenSessionIds.has(s.id)))) {
       for (const g of repo.groups) {
@@ -722,6 +724,7 @@ export function overlayLiveLanes(
           seenSessionIds.add(s.id)
         }
       }
+
       return repo
     }
 
@@ -731,7 +734,9 @@ export function overlayLiveLanes(
           if (seenSessionIds.has(s.id)) {
             return false
           }
+
           seenSessionIds.add(s.id)
+
           return true
         })
 

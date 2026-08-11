@@ -1,7 +1,7 @@
 import { type AppendMessage, AssistantRuntimeProvider, type ThreadMessage } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
 import { useQuery } from '@tanstack/react-query'
-import { type ReadableAtom, computed } from 'nanostores'
+import { computed, type ReadableAtom } from 'nanostores'
 import type * as React from 'react'
 import { memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router'
@@ -345,6 +345,7 @@ export const ChatView = memo(function ChatView({
     () => computed(view.$messages, msgs => msgs.filter(m => m.role === 'user').length),
     [view.$messages]
   )
+
   const userTurnCount = useStore($userTurnCount)
   const transferReady = typeof onTransfer === 'function' && userTurnCount >= 20
   const sessions = useStore($sessions)

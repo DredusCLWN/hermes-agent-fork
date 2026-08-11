@@ -16,6 +16,7 @@ export function useOnProfileSwitch(onSwitch: () => void): void {
     if (!initialized.current) {
       initialized.current = true
       prevProfile.current = profile
+
       return
     }
 

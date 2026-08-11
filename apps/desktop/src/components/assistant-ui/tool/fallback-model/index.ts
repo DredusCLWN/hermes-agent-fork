@@ -1395,6 +1395,7 @@ function dynamicTitle(
 
     if (command) {
       const processAlive = part.toolName === 'terminal' && terminalProcessAlive(result)
+
       // A partial `timeout` result still has a live process behind it — keep
       // the gerund ("Running…") until the process actually finishes, so the
       // title matches the still-ticking timer.

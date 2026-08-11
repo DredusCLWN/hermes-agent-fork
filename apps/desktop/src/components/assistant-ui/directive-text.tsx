@@ -559,8 +559,6 @@ const DirectiveChip: FC<{
   return activate ? (
     <span
       {...props}
-      role="button"
-      tabIndex={0}
       onClick={activate}
       onKeyDown={event => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -568,6 +566,8 @@ const DirectiveChip: FC<{
           activate()
         }
       }}
+      role="button"
+      tabIndex={0}
     >
       {body}
     </span>
