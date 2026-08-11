@@ -48,7 +48,7 @@ jobs:
           ls -la release-assets/
 
       - name: Publish to the tag's GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release-assets/*.exe
           generate_release_notes: true
