@@ -32,7 +32,6 @@ import { flashGoodVibes, flashPet } from './petFlashStore.js'
 import { turnController } from './turnController.js'
 import { getTurnState } from './turnStore.js'
 import { getUiState, patchUiState } from './uiStore.js'
-import { isWakeUserDisabled } from './wakeState.js'
 
 const NO_PROVIDER_RE = /\bNo (?:LLM|inference) provider configured\b/i
 
@@ -390,7 +389,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
   const { appendMessage, panel, setHistoryItems } = ctx.transcript
   const { setInput } = ctx.composer
   const { submitRef } = ctx.submission
-  const { setProcessing: setVoiceProcessing, setRecording: setVoiceRecording, setVoiceEnabled } = ctx.voice
 
   let pendingThinkingStatus = ''
   let thinkingStatusTimer: null | ReturnType<typeof setTimeout> = null
@@ -622,13 +620,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
     // "too many re-renders" guard in embedded dashboard PTYs.
     ensureAgentsNudgeConfig()
 
-    // Arm "Hey Hermes" if this surface owns it (server gates on config).
-    // Fire-and-forget + idempotent server-side, so reconnects are harmless.
-    // Skipped when the user explicitly ran `/wake off` this session — an
-    // explicit opt-out must survive gateway reconnects (see wakeState.ts).
-    if (!isWakeUserDisabled()) {
-      void rpc('wake.start', { surface: 'tui' }).catch(() => undefined)
-    }
 
     rpc<CommandsCatalogResponse>('commands.catalog', {})
       .then(r => {
@@ -890,111 +881,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         if (message) {
           sys(message)
         }
-
-        return
-      }
-
-      case 'voice.status': {
-        // Continuous VAD loop reports its internal state so the status bar
-        // can show listening / transcribing / idle without polling.
-        const state = String(ev.payload?.state ?? '')
-
-        if (state === 'listening') {
-          setVoiceRecording(true)
-          setVoiceProcessing(false)
-        } else if (state === 'transcribing') {
-          setVoiceRecording(false)
-          setVoiceProcessing(true)
-        } else {
-          setVoiceRecording(false)
-          setVoiceProcessing(false)
-        }
-
-        return
-      }
-
-      case 'voice.transcript': {
-        // Explicit user-intent stop: the user said (or typed) a bare stop
-        // phrase. The backend already halted the capture loop and flipped
-        // voice mode off — mirror it here like a manual /voice off, and say
-        // so (this is intent, not the no-speech timeout below).
-        if (ev.payload?.stop_phrase) {
-          setVoiceEnabled(false)
-          setVoiceRecording(false)
-          setVoiceProcessing(false)
-          sys('voice: stop phrase — voice chat ended')
-
-          return
-        }
-
-        // CLI parity: the 3-strikes silence detector flipped off automatically.
-        // Mirror that on the UI side and tell the user why the mode is off.
-        if (ev.payload?.no_speech_limit) {
-          setVoiceEnabled(false)
-          setVoiceRecording(false)
-          setVoiceProcessing(false)
-          sys('voice: no speech detected 3 times, continuous mode stopped')
-
-          return
-        }
-
-        const text = String(ev.payload?.text ?? '').trim()
-
-        if (!text) {
-          return
-        }
-
-        // CLI parity: _pending_input.put(transcript) unconditionally feeds
-        // the transcript to the agent as its next turn — draft handling
-        // doesn't apply because voice-mode users are speaking, not typing.
-        //
-        // We can't branch on composer input from inside a setInput updater
-        // (React strict mode double-invokes it, duplicating the submit).
-        // Just clear + defer submit so the cleared input is committed before
-        // submit reads it.
-        setInput('')
-        setTimeout(() => submitRef.current(text), 0)
-
-        return
-      }
-
-      case 'wake.detected': {
-        // "Hey Hermes": optionally open a fresh session (start_new_session),
-        // then arm voice capture so the user can speak hands-free. Mirrors CLI.
-        void (async () => {
-          // Multi-profile routing: the TUI is a single-profile process, so a
-          // phrase enrolled by ANOTHER profile can't be routed here — surface
-          // the switch command instead of starting voice on the wrong profile.
-          const wakeProfile = ev.payload?.profile?.trim()
-          const ownProfile = getUiState().info?.profile_name || 'default'
-
-          if (wakeProfile && wakeProfile !== ownProfile) {
-            sys(`wake phrase for profile '${wakeProfile}' — run: hermes -p ${wakeProfile} --tui`)
-            await rpc('wake.resume', {}).catch(() => undefined)
-
-            return
-          }
-
-          if (ev.payload?.start_new_session !== false) {
-            await newSession()
-          }
-
-          const sid = getUiState().sid
-
-          if (!sid) {
-            await rpc('wake.resume', {}).catch(() => undefined)
-
-            return
-          }
-
-          setVoiceEnabled(true)
-          await rpc('voice.toggle', { action: 'on' })
-          await rpc('voice.record', { action: 'start', session_id: sid })
-        })().catch((e: unknown) => {
-          sys(`wake: ${rpcErrorMessage(e)}`)
-
-          void rpc('wake.resume', {}).catch(() => undefined)
-        })
 
         return
       }

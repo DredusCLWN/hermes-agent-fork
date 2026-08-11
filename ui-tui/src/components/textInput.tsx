@@ -1,4 +1,4 @@
-import type { InputEvent, Key } from '@hermes/ink'
+﻿import type { InputEvent, Key } from '@hermes/ink'
 import * as Ink from '@hermes/ink'
 import { type MutableRefObject, useEffect, useMemo, useRef, useState } from 'react'
 
@@ -6,12 +6,9 @@ import { setInputSelection } from '../app/inputSelectionStore.js'
 import { readClipboardText, writeClipboardText } from '../lib/clipboard.js'
 import { cursorLayout, offsetFromPosition } from '../lib/inputMetrics.js'
 import {
-  DEFAULT_VOICE_RECORD_KEY,
   isActionMod,
   isMac,
   isMacActionFallback,
-  isVoiceToggleKey,
-  type ParsedVoiceRecordKey
 } from '../lib/platform.js'
 import { isTermuxTuiMode } from '../lib/termux.js'
 
@@ -617,7 +614,6 @@ export function TextInput({
   onSubmit,
   mask,
   mouseApiRef,
-  voiceRecordKey = DEFAULT_VOICE_RECORD_KEY,
   placeholder = '',
   placeholderColor,
   color,
@@ -1095,16 +1091,6 @@ export function TextInput({
     (inp: string, k: Key, event: InputEvent) => {
       const eventRaw = event.keypress.raw
 
-      // Configured voice shortcut wins over composer-level defaults like
-      // paste/copy so users who bind voice to ctrl+v / alt+v / cmd+v
-      // actually get voice toggled instead of a paste (Copilot round-7
-      // follow-up on #19835). The pass-through predicate is a no-op for
-      // ordinary typing and plain paste when voice is unbound to 'v'.
-      if (shouldPassThroughToGlobalHandler(inp, k, voiceRecordKey)) {
-        flushKeyBurst()
-
-        return
-      }
 
       if (
         eventRaw === '\x1bv' ||
@@ -1502,7 +1488,6 @@ interface TextInputProps {
   /** Hex color for placeholder text (theme muted); SGR dim when omitted. */
   placeholderColor?: string
   value: string
-  voiceRecordKey?: ParsedVoiceRecordKey
 }
 
 export type RightClickDecision = { action: 'copy'; text: string } | { action: 'paste' }
@@ -1533,20 +1518,6 @@ export function decideRightClickAction(
   return { action: 'paste' }
 }
 
-export const shouldPassThroughToGlobalHandler = (
-  input: string,
-  key: Key,
-  voiceRecordKey: ParsedVoiceRecordKey = DEFAULT_VOICE_RECORD_KEY
-): boolean =>
-  (key.ctrl && input === 'c') ||
-  (key.ctrl && input === 'x') ||
-  (key.ctrl && input === 'o') ||
-  key.tab ||
-  (key.shift && key.tab) ||
-  key.pageUp ||
-  key.pageDown ||
-  key.escape ||
-  isVoiceToggleKey(key, input, voiceRecordKey)
 
 export interface TextInputMouseApi {
   dragAt: (row: number, col: number) => void

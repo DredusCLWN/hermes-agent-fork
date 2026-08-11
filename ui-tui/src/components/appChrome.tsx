@@ -1,4 +1,4 @@
-import { Box, type ScrollBoxHandle, stringWidth, Text } from '@hermes/ink'
+﻿import { Box, type ScrollBoxHandle, stringWidth, Text } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
 import { type ReactNode, type RefObject, useEffect, useMemo, useRef, useState } from 'react'
 import unicodeSpinners from 'unicode-animations'
@@ -285,7 +285,7 @@ export function statusRuleWidths(cols: number, cwdLabel: string, minLeftContent 
 
 // Progressive disclosure for the status rule's lower-priority tail segments.
 // As the terminal narrows we shed the least important pieces first (cost →
-// bg → voice → compressions → duration → context bar), and below the bar
+// bg → compressions → duration → context bar), and below the bar
 // breakpoint the context read-out collapses to a bare token count. Status and
 // model are never gated here — they're guaranteed room by `statusRuleWidths`.
 export interface StatusBarSegments {
@@ -295,7 +295,6 @@ export interface StatusBarSegments {
   compressions: boolean
   duration: boolean
   subagents: boolean
-  voice: boolean
 }
 
 export function statusBarSegments(cols: number): StatusBarSegments {
@@ -306,7 +305,6 @@ export function statusBarSegments(cols: number): StatusBarSegments {
     bar: w >= 72,
     duration: w >= 76,
     compressions: w >= 80,
-    voice: w >= 84,
     bg: w >= 88,
     subagents: w >= 92
   }
@@ -482,7 +480,6 @@ export function StatusRule({
   liveSessionCount,
   sessionStartedAt,
   turnStartedAt,
-  voiceLabel,
   onSessionCountClick,
   t
 }: StatusRuleProps) {
@@ -544,7 +541,7 @@ export function StatusRule({
 
   // Whole-segment progressive disclosure for the tail: a segment renders only
   // if it fits in the space left after the pinned essentials, evaluated in
-  // descending priority order — bar, duration, compressions, voice, session
+  // descending priority order — bar, duration, compressions, session
   // count, bg, cost. Lower-priority segments drop first and nothing truncates
   // mid-segment, so status/model/context are never crushed.
   const SEP = stringWidth(' │ ')
@@ -582,7 +579,6 @@ export function StatusRule({
     segs.duration && !busy && lastTurnEndedAt != null && fits(SEP + stringWidth('✓ ') + MAX_DURATION_WIDTH)
 
   const showCompressions = segs.compressions && compressions > 0 && fits(SEP + stringWidth(`cmp ${compressions}`))
-  const showVoice = segs.voice && !!voiceLabel && fits(SEP + stringWidth(voiceLabel))
   const showSessionCount = !!sessionCountText && fits(SEP + stringWidth(sessionCountText))
   const showBg = segs.bg && bgCount > 0 && fits(SEP + stringWidth(`${bgCount} bg`))
   const subagentCount = typeof usage.active_subagents === 'number' ? usage.active_subagents : 0
@@ -701,17 +697,6 @@ export function StatusRule({
             <Text color={compressions >= 10 ? t.color.error : compressions >= 5 ? t.color.warn : t.color.muted}>
               cmp {compressions}
             </Text>
-          </Text>
-        ) : null}
-        {showVoice ? (
-          <Text
-            color={
-              voiceLabel!.startsWith('●') ? t.color.error : voiceLabel!.startsWith('◉') ? t.color.warn : t.color.muted
-            }
-            wrap="truncate-end"
-          >
-            {' │ '}
-            {voiceLabel}
           </Text>
         ) : null}
         {showSessionCount ? sessionCountNode : null}
@@ -873,7 +858,6 @@ interface StatusRuleProps {
   t: Theme
   turnStartedAt?: null | number
   usage: Usage
-  voiceLabel?: string
   onSessionCountClick?: () => void
 }
 

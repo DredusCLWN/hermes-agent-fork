@@ -67,7 +67,6 @@ describe('statusBarSegments', () => {
       bar: true,
       duration: true,
       compressions: true,
-      voice: true,
       bg: true,
       subagents: true
     } satisfies StatusBarSegments)
@@ -87,7 +86,6 @@ describe('statusBarSegments', () => {
       'bar',
       'duration',
       'compressions',
-      'voice',
       'bg',
       'subagents'
     ]

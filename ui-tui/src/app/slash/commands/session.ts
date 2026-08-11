@@ -1,4 +1,4 @@
-import { usageBarsText } from '../../../components/overlayPrimitives.js'
+﻿import { usageBarsText } from '../../../components/overlayPrimitives.js'
 import { introMsg, toTranscriptMessages } from '../../../domain/messages.js'
 import { sessionScopedModelArg, TUI_SESSION_MODEL_FLAG } from '../../../domain/slash.js'
 import type {
@@ -7,11 +7,9 @@ import type {
   ConfigSetResponse,
   SessionBranchResponse,
   SessionCompressResponse,
-  SessionUsageResponse,
   SlashExecResponse,
-  VoiceToggleResponse
+  SessionUsageResponse,
 } from '../../../gatewayTypes.js'
-import { formatVoiceRecordKey, parseVoiceRecordKey } from '../../../lib/platform.js'
 import { fmtK } from '../../../lib/text.js'
 import type { PanelSection } from '../../../types.js'
 import { applyConfiguredTuiTheme } from '../../createGatewayEventHandler.js'
@@ -292,103 +290,7 @@ export const sessionCommands: SlashCommand[] = [
   },
 
   {
-    help: 'voice mode: [on|off|tts|status]',
-    name: 'voice',
-    run: (arg, ctx) => {
-      const normalized = (arg ?? '').trim().toLowerCase()
 
-      const action =
-        normalized === 'on' || normalized === 'off' || normalized === 'tts' || normalized === 'status'
-          ? normalized
-          : 'status'
-
-      ctx.gateway.rpc<VoiceToggleResponse>('voice.toggle', { action }).then(
-        ctx.guarded<VoiceToggleResponse>(r => {
-          ctx.voice.setVoiceEnabled(!!r.enabled)
-          ctx.voice.setVoiceTts(!!r.tts)
-
-          // Render the configured record key (config.yaml ``voice.record_key``)
-          // instead of hardcoded "Ctrl+B" — the gateway response carries the
-          // current value so /voice status and /voice on stay in sync with
-          // both the CLI and the TUI's actual binding (#18994).
-          //
-          // Copilot review on #19835 caught that rendering from the fresh
-          // backend response WITHOUT updating the frontend ``voice.recordKey``
-          // state would skew display and binding between config-edit and
-          // the next ``mtime`` poll (~5s). Parse once, push into state so
-          // ``useInputHandlers()`` picks up the new binding immediately.
-          //
-          // Round-2 follow-up: only push state when the response actually
-          // carries ``record_key`` — otherwise an older gateway (or a future
-          // branch that forgets to include it) would clobber a custom user
-          // binding back to the default on every /voice invocation. The
-          // label still falls back to the documented default for display.
-          const parsed = r.record_key ? parseVoiceRecordKey(r.record_key) : undefined
-
-          if (parsed) {
-            ctx.voice.setVoiceRecordKey(parsed)
-          }
-
-          const recordKeyLabel = formatVoiceRecordKey(parsed ?? parseVoiceRecordKey('ctrl+b'))
-
-          // Match CLI's _show_voice_status / _enable_voice_mode /
-          // _toggle_voice_tts output shape so users don't have to learn
-          // two vocabularies.
-          if (action === 'status') {
-            const mode = r.enabled ? 'ON' : 'OFF'
-            const tts = r.tts ? 'ON' : 'OFF'
-            ctx.transcript.sys('Voice Mode Status')
-            ctx.transcript.sys(`  Mode:       ${mode}`)
-            ctx.transcript.sys(`  TTS:        ${tts}`)
-            ctx.transcript.sys(`  Record key: ${recordKeyLabel}`)
-
-            // CLI's "Requirements:" block — surfaces STT/audio setup issues
-            // so the user sees "STT provider: MISSING ..." instead of
-            // silently failing on every record-key press.
-            if (r.details) {
-              ctx.transcript.sys('')
-              ctx.transcript.sys('  Requirements:')
-
-              for (const line of r.details.split('\n')) {
-                if (line.trim()) {
-                  ctx.transcript.sys(`    ${line}`)
-                }
-              }
-            }
-
-            return
-          }
-
-          if (action === 'tts') {
-            ctx.transcript.sys(`Voice TTS ${r.tts ? 'enabled' : 'disabled'}.`)
-
-            return
-          }
-
-          // on/off — mirror cli.py:_enable_voice_mode's 3-line output
-          if (r.enabled) {
-            const tts = r.tts ? ' (TTS enabled)' : ''
-            ctx.transcript.sys(`Voice mode enabled${tts}`)
-            ctx.transcript.sys(`  ${recordKeyLabel} to start/stop recording`)
-
-            // Spoken-stop hint — backend-sourced from voice.stop_phrases so a
-            // custom phrase renders correctly; absent/empty means the feature
-            // is disabled (stop_phrases: []) and no hint is shown.
-            if (r.stop_hint) {
-              ctx.transcript.sys(`  ${r.stop_hint}`)
-            }
-
-            ctx.transcript.sys('  /voice tts  to toggle speech output')
-            ctx.transcript.sys('  /voice off  to disable voice mode')
-          } else {
-            ctx.transcript.sys('Voice mode disabled.')
-          }
-        })
-      )
-    }
-  },
-
-  {
     help: 'toggle / adopt / resize an animated pet',
     name: 'pet',
     usage: '/pet [toggle | list | scale <n> | <slug>]',

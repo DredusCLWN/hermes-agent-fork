@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs'
+﻿import { writeFileSync } from 'node:fs'
 
 import type { ScrollBoxHandle } from '@hermes/ink'
 import { evictInkCaches } from '@hermes/ink'
@@ -137,8 +137,6 @@ export interface UseSessionLifecycleOptions {
   setLastUserMsg: StateSetter<string>
   setSessionStartedAt: StateSetter<number>
   setStickyPrompt: StateSetter<string>
-  setVoiceProcessing: StateSetter<boolean>
-  setVoiceRecording: StateSetter<boolean>
   sys: (text: string) => void
 }
 
@@ -155,8 +153,6 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
     setLastUserMsg,
     setSessionStartedAt,
     setStickyPrompt,
-    setVoiceProcessing,
-    setVoiceRecording,
     sys
   } = opts
 
@@ -172,8 +168,6 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
     cancelResumeScrollRef.current?.()
     cancelResumeScrollRef.current = null
     turnController.fullReset()
-    setVoiceRecording(false)
-    setVoiceProcessing(false)
     patchUiState({ bgTasks: new Set(), info: null, sid: null, usage: ZERO })
     setHistoryItems([])
     setLastUserMsg('')
@@ -182,7 +176,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
     // Half-prune: new session has new keys, but keep a warm pool in case
     // the user resumes back to the prior session.
     evictInkCaches('half')
-  }, [composerActions, setHistoryItems, setLastUserMsg, setStickyPrompt, setVoiceProcessing, setVoiceRecording])
+  }, [composerActions, setHistoryItems, setLastUserMsg, setStickyPrompt])
 
   useEffect(
     () => () => {

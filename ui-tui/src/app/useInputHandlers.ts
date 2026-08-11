@@ -10,9 +10,8 @@ import type {
   ConfigSetResponse,
   SecretRespondResponse,
   SudoRespondResponse,
-  VoiceRecordResponse
 } from '../gatewayTypes.js'
-import { isAction, isCopyShortcut, isMac, isVoiceToggleKey } from '../lib/platform.js'
+import { isAction, isCopyShortcut, isMac } from '../lib/platform.js'
 import { computePrecisionWheelStep, initPrecisionWheel } from '../lib/precisionWheel.js'
 import { computeWheelStep, initWheelAccelForHost } from '../lib/wheelAccel.js'
 import { closeWidget, dispatchWidgetInput } from '../sdk/host.js'
@@ -85,26 +84,6 @@ export function shouldFallThroughForScroll(key: {
   return false
 }
 
-export function applyVoiceRecordResponse(
-  response: null | VoiceRecordResponse,
-  starting: boolean,
-  voice: Pick<InputHandlerContext['voice'], 'setProcessing' | 'setRecording'>,
-  sys: (text: string) => void
-) {
-  if (!starting || response?.status === 'recording') {
-    return
-  }
-
-  voice.setRecording(false)
-
-  if (response?.status === 'busy') {
-    voice.setProcessing(true)
-    sys('voice: still transcribing; try again shortly')
-  } else {
-    voice.setProcessing(false)
-  }
-}
-
 export function dismissSensitivePrompt(
   overlay: Pick<OverlayState, 'secret' | 'sudo'>,
   rpc: GatewayRpc,
@@ -132,7 +111,7 @@ export function dismissSensitivePrompt(
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
 export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
-  const { actions, composer, gateway, terminal, voice, wheelStep } = ctx
+  const { actions, composer, gateway, terminal, wheelStep } = ctx
   const { actions: cActions, refs: cRefs, state: cState } = composer
 
   const overlay = useStore($overlayState)
@@ -279,45 +258,6 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       cActions.setHistoryIdx(next)
       cActions.setInput(h[next] ?? '')
     }
-  }
-
-  // CLI parity: Ctrl+B toggles a VAD-bounded push-to-talk capture
-  // (NOT the voice-mode umbrella bit). The mode is enabled via /voice on;
-  // Ctrl+B while the mode is off sys-nudges the user. While the mode is
-  // on, the first press starts a single VAD-bounded capture
-  // (gateway -> start_continuous(auto_restart=false), VAD auto-stop ->
-  // transcribe -> idle), a subsequent press stops and transcribes it.
-  // The gateway publishes voice.status + voice.transcript events that
-  // createGatewayEventHandler turns into UI badges and composer injection.
-  const voiceRecordToggle = () => {
-    if (!voice.enabled) {
-      return actions.sys('voice: mode is off — enable with /voice on')
-    }
-
-    const starting = !voice.recording
-    const action = starting ? 'start' : 'stop'
-
-    // Optimistic UI — flip the REC badge immediately so the user gets
-    // feedback while the RPC round-trips; the voice.status event is the
-    // authoritative source and may correct us.
-    if (starting) {
-      voice.setRecording(true)
-    } else {
-      voice.setRecording(false)
-      voice.setProcessing(false)
-    }
-
-    gateway
-      .rpc<VoiceRecordResponse>('voice.record', { action, session_id: getUiState().sid })
-      .then(r => applyVoiceRecordResponse(r, starting, voice, actions.sys))
-      .catch((e: Error) => {
-        // Revert optimistic UI on failure.
-        if (starting) {
-          voice.setRecording(false)
-        }
-
-        actions.sys(`voice error: ${e.message}`)
-      })
   }
 
   // Double-Esc discards the draft, matching Claude Code / Gemini CLI. It
@@ -510,13 +450,6 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       return scrollTranscript(key.pageUp ? -step : step)
     }
 
-    // Escape-based voice bindings (ctrl/alt/super+escape) must win before the
-    // generic Esc handlers below; otherwise queue-edit cancel / selection-clear
-    // would swallow the chord and /voice would advertise a shortcut that never
-    // actually toggles recording in those UI states.
-    if (key.escape && isVoiceToggleKey(key, ch, voice.recordKey)) {
-      return voiceRecordToggle()
-    }
 
     // Queue-edit cancel beats selection-clear for plain Esc: the queue header
     // explicitly promises "Esc cancel", so honoring it takes priority over the
@@ -634,9 +567,6 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       return
     }
 
-    if (isVoiceToggleKey(key, ch, voice.recordKey)) {
-      return voiceRecordToggle()
-    }
 
     // Cmd/Ctrl+G, plus Alt+G fallback for VSCode/Cursor (they bind the
     // primary keystroke to "Find Next" before the TUI sees it; Alt+G

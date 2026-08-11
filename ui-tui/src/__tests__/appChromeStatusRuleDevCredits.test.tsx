@@ -52,7 +52,6 @@ const baseProps = {
   t: DEFAULT_THEME,
   turnStartedAt: null,
   usage: { context_max: 200_000, context_percent: 25, context_used: 50_000, total: 50_000 },
-  voiceLabel: ''
 }
 
 describe('StatusRule dev-credits banner (HERMES_DEV_CREDITS on)', () => {

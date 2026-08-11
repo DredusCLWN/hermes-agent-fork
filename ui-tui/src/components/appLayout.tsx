@@ -1,4 +1,4 @@
-// Importing the apps barrel registers the reference widget apps at startup.
+﻿// Importing the apps barrel registers the reference widget apps at startup.
 import '../sdk/apps/index.js'
 
 import { AlternateScreen, Box, NoSelect, ScrollBox, Text } from '@hermes/ink'
@@ -431,7 +431,6 @@ const ComposerPane = memo(function ComposerPane({
                   // toward the resolved surface inherits that wrong polarity.
                   placeholderColor={ui.theme.color.muted}
                   value={composer.input}
-                  voiceRecordKey={composer.voiceRecordKey}
                 />
               </Box>
 
@@ -507,7 +506,6 @@ const StatusRulePane = memo(function StatusRulePane({
         t={ui.theme}
         turnStartedAt={status.turnStartedAt}
         usage={ui.usage}
-        voiceLabel={status.voiceLabel}
       />
     </Box>
   )
